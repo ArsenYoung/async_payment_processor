@@ -6,3 +6,4 @@ git_rules.md
 poetry.toml
 __pycache__/
 *.py[cod]
+.env
