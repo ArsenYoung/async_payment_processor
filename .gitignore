@@ -2,3 +2,7 @@ plan.md
 task.pdf
 AGENTS.md
 git_rules.md
+.venv/
+poetry.toml
+__pycache__/
+*.py[cod]
