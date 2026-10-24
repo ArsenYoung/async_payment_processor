@@ -9,3 +9,8 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+@app.get("/health", tags=["health"])
+async def healthcheck() -> dict[str, str]:
+    return {"status": "ok"}
