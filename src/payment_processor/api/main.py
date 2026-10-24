@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,7 +8,7 @@ from payment_processor.messaging.broker import create_broker
 
 
 @asynccontextmanager
-async def lifespan(application: FastAPI):
+async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     """Open infrastructure connections when the API starts."""
     await check_database_connection()
     broker = create_broker()
