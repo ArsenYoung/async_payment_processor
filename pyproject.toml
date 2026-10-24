@@ -1,0 +1,21 @@
+[project]
+name = "payment-processing-service"
+version = "0.1.0"
+description = "Asynchronous payment processing service"
+authors = [{ name = "Arsenii Ostroumov" }]
+readme = "README.md"
+requires-python = ">=3.12,<4.0"
+dependencies = [
+    "fastapi>=0.115.0,<1.0.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "sqlalchemy[asyncio]>=2.0.0,<3.0.0",
+    "faststream[rabbit]>=0.5.0,<1.0.0",
+    "alembic>=1.13.0,<2.0.0",
+]
+
+[tool.poetry]
+packages = [{ include = "payment_processor", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
