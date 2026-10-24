@@ -4,8 +4,17 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, Numeric, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from payment_processor.db.models.base import Base, enum_values
