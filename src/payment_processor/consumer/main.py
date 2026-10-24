@@ -1,16 +1,20 @@
-"""Message consumer entry point."""
+import asyncio
+
+from payment_processor.messaging.broker import create_broker
 
 
 async def run_consumer() -> None:
-    """Start the payment message consumer.
+    broker = create_broker()
+    await broker.connect()
 
-    The broker connection and message handler will be implemented in the
-    messaging setup task.
-    """
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await broker.stop()
 
 
 def main() -> None:
-    """Run the consumer process."""
+    asyncio.run(run_consumer())
 
 
 if __name__ == "__main__":
