@@ -2,6 +2,20 @@
 
 Асинхронный сервис обработки платежей на FastAPI, PostgreSQL и RabbitMQ.
 
+## Текущий статус
+
+Готовы:
+
+- базовая структура API и consumer;
+- конфигурация через переменные окружения;
+- Dockerfile и Docker Compose;
+- подключение к PostgreSQL и RabbitMQ;
+- модели `Payment` и `Outbox`;
+- Alembic-миграция для таблиц `payments` и `outbox`;
+- endpoint `GET /health`.
+
+В следующих блоках будут добавлены платежные API, Outbox publisher, обработка webhook, retry и DLQ.
+
 ## Структура проекта
 
 ```text
@@ -9,8 +23,11 @@ src/payment_processor/
 ├── api/          # HTTP API
 ├── consumer/     # обработчик сообщений
 ├── core/         # конфигурация приложения
-├── db/           # подключение к PostgreSQL
+├── db/           # подключение и модели PostgreSQL
 └── messaging/    # подключение к RabbitMQ
+
+alembic/
+└── versions/     # миграции базы данных
 ```
 
 ## Требования
@@ -96,6 +113,60 @@ poetry run uvicorn payment_processor.api.main:app --reload
 ```bash
 poetry run python -m payment_processor.consumer.main
 ```
+
+## Миграции базы данных
+
+Применить все миграции:
+
+```bash
+poetry run alembic upgrade head
+```
+
+Откатить последнюю миграцию:
+
+```bash
+poetry run alembic downgrade -1
+```
+
+Показать текущую версию базы:
+
+```bash
+poetry run alembic current
+```
+
+Создать новую миграцию после изменения моделей:
+
+```bash
+poetry run alembic revision --autogenerate -m "describe schema change"
+```
+
+## Проверки качества
+
+Проверить стиль и ошибки в коде:
+
+```bash
+poetry run ruff check src alembic
+```
+
+Проверить форматирование:
+
+```bash
+poetry run ruff format --check src alembic
+```
+
+Проверить типы:
+
+```bash
+poetry run mypy
+```
+
+Запустить тесты:
+
+```bash
+poetry run pytest
+```
+
+Тесты будут добавлены на следующих этапах разработки.
 
 ## Полезные команды
 
