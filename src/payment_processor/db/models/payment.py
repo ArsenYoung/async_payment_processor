@@ -8,11 +8,7 @@ from sqlalchemy import CheckConstraint, DateTime, Enum, Numeric, String, UniqueC
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from payment_processor.db.models.base import Base
-
-
-def enum_values(enum_type: type[StrEnum]) -> list[str]:
-    return [member.value for member in enum_type]
+from payment_processor.db.models.base import Base, enum_values
 
 
 class PaymentCurrency(StrEnum):
