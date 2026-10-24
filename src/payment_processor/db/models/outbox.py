@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Integer, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,8 @@ class Outbox(Base):
 
     __table_args__ = (
         CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        Index("ix_outbox_unpublished_created", "published_at", "created_at"),
+        Index("ix_outbox_payment_id", "payment_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
