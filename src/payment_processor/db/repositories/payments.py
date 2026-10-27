@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,9 @@ from payment_processor.db.models import Outbox, OutboxEventType, Payment
 class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def find_by_id(self, payment_id: UUID) -> Payment | None:
+        return await self.session.get(Payment, payment_id)
 
     async def find_by_idempotency_key(self, idempotency_key: str) -> Payment | None:
         result = await self.session.execute(
