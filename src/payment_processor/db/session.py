@@ -9,27 +9,25 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from payment_processor.core.config import settings
 
-engine: AsyncEngine = create_async_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-)
-session_factory = async_sessionmaker(engine, expire_on_commit=False)
+class Database:
+    def __init__(self, database_url: str) -> None:
+        self.engine: AsyncEngine = create_async_engine(database_url, pool_pre_ping=True)
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
 
-
-async def get_session() -> AsyncIterator[AsyncSession]:
-    async with session_factory() as session:
-        yield session
-
-
-@asynccontextmanager
-async def session_scope() -> AsyncGenerator[AsyncSession, None]:
-    async with session_factory() as session:
-        async with session.begin():
+    async def get_session(self) -> AsyncIterator[AsyncSession]:
+        async with self.session_factory() as session:
             yield session
 
+    @asynccontextmanager
+    async def session_scope(self) -> AsyncGenerator[AsyncSession, None]:
+        async with self.session_factory() as session:
+            async with session.begin():
+                yield session
 
-async def check_database_connection() -> None:
-    async with engine.connect() as connection:
-        await connection.execute(text("SELECT 1"))
+    async def check_connection(self) -> None:
+        async with self.engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+
+    async def dispose(self) -> None:
+        await self.engine.dispose()
