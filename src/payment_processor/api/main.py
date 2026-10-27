@@ -1,9 +1,10 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 
+from payment_processor.api.dependencies import require_api_key
 from payment_processor.api.exception_handlers import request_validation_error_handler
 from payment_processor.api.routes.payments import router as payments_router
 from payment_processor.core.config import settings
@@ -29,7 +30,11 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app(database: Database | None = None) -> FastAPI:
-    application = FastAPI(title="Payment Processing Service", lifespan=lifespan)
+    application = FastAPI(
+        title="Payment Processing Service",
+        lifespan=lifespan,
+        dependencies=[Depends(require_api_key)],
+    )
     application.state.database = (
         database if database is not None else Database(settings.database_url)
     )

@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import AfterValidator
 
-from payment_processor.api.dependencies import get_payment_service, require_api_key
+from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.schemas.payment import (
     PaymentCreateRequest,
     PaymentCreateResponse,
@@ -21,7 +21,6 @@ router = APIRouter(prefix="/payments", tags=["payments"])
     "",
     response_model=PaymentCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_api_key)],
 )
 async def create_payment(
     request: PaymentCreateRequest,
@@ -51,7 +50,6 @@ async def create_payment(
     "/{payment_id}",
     response_model=PaymentDetailsResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_api_key)],
 )
 async def get_payment(
     payment_id: UUID,

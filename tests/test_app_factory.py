@@ -152,7 +152,9 @@ async def test_each_application_has_healthcheck(
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
         ) as client:
-            response = await client.get("/health")
+            response = await client.get(
+                "/health", headers={"X-API-Key": settings.api_key}
+            )
 
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
@@ -170,6 +172,86 @@ async def test_each_application_has_protected_payment_route(
 
         assert response.status_code == 401
         assert response.json() == {"detail": "Invalid API key"}
+
+
+@pytest.mark.asyncio
+async def test_each_application_protects_added_routes(
+    applications: tuple[FastAPI, FastAPI],
+) -> None:
+    async def additional_route() -> dict[str, str]:
+        return {"status": "protected"}
+
+    for application in applications:
+        application.add_api_route("/additional", additional_route, methods=["GET"])
+        async with AsyncClient(
+            transport=ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            unauthorized = await client.get("/additional")
+            authorized = await client.get(
+                "/additional", headers={"X-API-Key": settings.api_key}
+            )
+
+        assert unauthorized.status_code == 401
+        assert authorized.status_code == 200
+        assert authorized.json() == {"status": "protected"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/docs", "text/html"),
+        ("/redoc", "text/html"),
+        ("/openapi.json", "application/json"),
+        ("/docs/oauth2-redirect", "text/html"),
+    ],
+)
+@pytest.mark.parametrize("with_api_key", [False, True], ids=["anonymous", "authorized"])
+async def test_each_application_exposes_public_documentation(
+    applications: tuple[FastAPI, FastAPI],
+    path: str,
+    content_type: str,
+    with_api_key: bool,
+) -> None:
+    headers = {"X-API-Key": settings.api_key} if with_api_key else {}
+    for application in applications:
+        async with AsyncClient(
+            transport=ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            response = await client.get(path, headers=headers)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(content_type)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/health", "get"),
+        ("/api/v1/payments", "post"),
+        ("/api/v1/payments/{payment_id}", "get"),
+    ],
+)
+async def test_each_application_documents_api_key_authorization(
+    applications: tuple[FastAPI, FastAPI],
+    path: str,
+    method: str,
+) -> None:
+    for application in applications:
+        async with AsyncClient(
+            transport=ASGITransport(app=application), base_url="http://test"
+        ) as client:
+            response = await client.get("/openapi.json")
+
+        assert response.status_code == 200
+        schema = response.json()
+        assert schema["components"]["securitySchemes"]["APIKey"] == {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+        }
+        assert schema["paths"][path][method]["security"] == [{"APIKey": []}]
 
 
 @pytest.mark.asyncio

@@ -75,15 +75,22 @@ docker compose down
 
 - API: <http://localhost:8000>
 - Swagger UI: <http://localhost:8000/docs>
+- ReDoc: <http://localhost:8000/redoc>
+- OpenAPI: <http://localhost:8000/openapi.json>
 - Healthcheck: <http://localhost:8000/health>
 - RabbitMQ Management UI: <http://localhost:15672>
 
 Для RabbitMQ Management UI используются значения из `.env`. В шаблоне указаны `guest` и `change-me-rabbitmq`.
 
-Проверка API:
+Операции API и `/health` требуют заголовок `X-API-Key`. Swagger UI, ReDoc и OpenAPI доступны без ключа.
+
+Для выполнения запросов в Swagger нажмите **Authorize** и введите значение `API_KEY` из `.env`. Swagger будет передавать его в заголовке `X-API-Key`.
+
+Для проверки API задайте переменную `API_KEY` в терминале тем же значением, что в `.env`:
 
 ```bash
-curl http://localhost:8000/health
+export API_KEY="<значение API_KEY из .env>"
+curl -H "X-API-Key: ${API_KEY}" http://localhost:8000/health
 ```
 
 Ожидаемый ответ:
