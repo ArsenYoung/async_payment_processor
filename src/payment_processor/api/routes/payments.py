@@ -1,4 +1,5 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import AfterValidator
@@ -7,6 +8,7 @@ from payment_processor.api.dependencies import get_payment_service, require_api_
 from payment_processor.api.schemas.payment import (
     PaymentCreateRequest,
     PaymentCreateResponse,
+    PaymentDetailsResponse,
 )
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.services.idempotency import IdempotencyConflictError
@@ -42,4 +44,35 @@ async def create_payment(
         payment_id=payment.id,
         status=payment.status,
         created_at=payment.created_at,
+    )
+
+
+@router.get(
+    "/{payment_id}",
+    response_model=PaymentDetailsResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_payment(
+    payment_id: UUID,
+    payment_service: Annotated[PaymentService, Depends(get_payment_service)],
+) -> PaymentDetailsResponse:
+    payment = await payment_service.get_payment(payment_id)
+    if payment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found",
+        )
+
+    return PaymentDetailsResponse(
+        payment_id=payment.id,
+        amount=payment.amount,
+        currency=payment.currency,
+        description=payment.description,
+        metadata=payment.payment_metadata,
+        idempotency_key=payment.idempotency_key,
+        webhook_url=payment.webhook_url,
+        status=payment.status,
+        created_at=payment.created_at,
+        processed_at=payment.processed_at,
     )
