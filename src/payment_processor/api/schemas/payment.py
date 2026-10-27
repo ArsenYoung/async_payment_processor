@@ -45,3 +45,13 @@ class PaymentCreateResponse(BaseModel):
     payment_id: UUID
     status: PaymentStatus
     created_at: datetime
+
+
+class PaymentDetailsResponse(PaymentCreateResponse):
+    amount: Decimal
+    currency: PaymentCurrency
+    description: str
+    metadata: dict[str, JsonValue]
+    idempotency_key: str
+    webhook_url: str
+    processed_at: datetime | None

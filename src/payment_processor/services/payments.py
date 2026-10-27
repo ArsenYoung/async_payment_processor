@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +24,11 @@ class PaymentService:
     ) -> None:
         self._session_scope_factory = session_scope_factory
         self._repository_factory = repository_factory
+
+    async def get_payment(self, payment_id: UUID) -> Payment | None:
+        async with self._session_scope_factory() as session:
+            repository = self._repository_factory(session)
+            return await repository.find_by_id(payment_id)
 
     async def create_payment(
         self, request: PaymentCreateRequest, idempotency_key: str
