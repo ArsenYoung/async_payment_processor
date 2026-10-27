@@ -14,6 +14,25 @@ from payment_processor.services.payments import PaymentService
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "api_key",
+    [None, b"wrong-api-key", b"\xff"],
+    ids=["missing", "wrong", "non-ascii"],
+)
+async def test_healthcheck_requires_valid_api_key(
+    client: AsyncClient,
+    api_key: bytes | None,
+) -> None:
+    response = await client.get(
+        "/health",
+        headers=[] if api_key is None else [(b"X-API-Key", api_key)],
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid API key"}
+
+
+@pytest.mark.asyncio
 async def test_missing_api_key_returns_unauthorized(
     client: AsyncClient,
     idempotency_key: str,
