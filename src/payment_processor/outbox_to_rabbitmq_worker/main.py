@@ -24,6 +24,9 @@ async def _publish() -> None:
             configure_library_logging()
             await declare_payment_topology(broker)
             service = OutboxService(database.session_scope, broker)
+            logging.getLogger(__name__).info(
+                "Outbox publisher ready", extra={"outcome": "ready"}
+            )
             await service.run(
                 batch_size=settings.outbox_batch_size,
                 poll_interval=settings.outbox_poll_interval,

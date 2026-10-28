@@ -5,7 +5,9 @@ import logging
 import re
 import sys
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
@@ -31,6 +33,22 @@ _DEPENDENCY_LOGGERS = (
     "httpx",
     "sqlalchemy",
 )
+_processing_context: ContextVar[dict[str, object] | None] = ContextVar(
+    "processing_log_context", default=None
+)
+
+
+@contextmanager
+def processing_context(**fields: object) -> Iterator[None]:
+    token = _processing_context.set({**(_processing_context.get() or {}), **fields})
+    try:
+        yield
+    finally:
+        _processing_context.reset(token)
+
+
+def processing_fields(**fields: object) -> dict[str, object]:
+    return {**(_processing_context.get() or {}), **fields}
 
 
 class ApplicationFormatter(logging.Formatter):
@@ -143,6 +161,18 @@ class ApplicationFormatter(logging.Formatter):
             "status_code",
             "duration_ms",
             "payment_id",
+            "event_id",
+            "worker",
+            "queue",
+            "operation",
+            "outcome",
+            "attempt",
+            "publication_attempt",
+            "next_attempt",
+            "retry_delay_ms",
+            "reason",
+            "error_type",
+            "payment_status",
         ):
             value = getattr(record, field, None)
             if isinstance(value, str):

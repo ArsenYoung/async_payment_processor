@@ -1,12 +1,15 @@
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.core.logging import processing_fields
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.repositories.payments import (
     PaymentRepository,
@@ -15,6 +18,8 @@ from payment_processor.db.repositories.payments import (
 from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.webhooks import WebhookClient
+
+logger = logging.getLogger(__name__)
 
 
 class IdempotencyConflictError(Exception):
@@ -49,28 +54,82 @@ class PaymentService:
             return await self._recover_payment(request, idempotency_key, error)
 
     async def process_payment(self, payment_id: UUID) -> Payment:
-        async with self._session_scope_factory() as session:
-            repository = self._repository_factory(session)
-            payment = await repository.find_by_id_for_update(payment_id)
-            if payment is None:
-                raise PaymentNotFoundError(payment_id)
-            if payment.status == PaymentStatus.PENDING:
-                payment.status = await self._gateway.process()
-                payment.processed_at = datetime.now(UTC)
+        started = perf_counter()
+        fields = processing_fields(
+            payment_id=str(payment_id), operation="payment_process"
+        )
+        try:
+            async with self._session_scope_factory() as session:
+                repository = self._repository_factory(session)
+                payment = await repository.find_by_id_for_update(payment_id)
+                if payment is None:
+                    raise PaymentNotFoundError(payment_id)
+                outcome = "already_processed"
+                if payment.status == PaymentStatus.PENDING:
+                    payment.status = await self._gateway.process()
+                    payment.processed_at = datetime.now(UTC)
+                    outcome = "processed"
+        except Exception as error:
+            logger.warning(
+                "Payment processing failed",
+                extra={
+                    **fields,
+                    "outcome": "failed",
+                    "duration_ms": (perf_counter() - started) * 1000,
+                    "error_type": type(error).__name__,
+                },
+                exc_info=True,
+            )
+            raise
+        logger.info(
+            "Payment processing completed",
+            extra={
+                **fields,
+                "outcome": outcome,
+                "payment_status": payment.status.value,
+                "duration_ms": (perf_counter() - started) * 1000,
+            },
+        )
         return payment
 
     async def deliver_webhook(
         self, payment_id: UUID, webhook_client: WebhookClient
     ) -> None:
-        async with self._session_scope_factory() as session:
-            repository = self._repository_factory(session)
-            payment = await repository.find_by_id_for_update(payment_id)
-            if payment is None:
-                raise PaymentNotFoundError(payment_id)
-            if payment.webhook_delivered_at is not None:
-                return
-            await webhook_client.send(payment)
-            await repository.mark_webhook_delivered(payment)
+        started = perf_counter()
+        fields = processing_fields(
+            payment_id=str(payment_id), operation="webhook_delivery"
+        )
+        try:
+            async with self._session_scope_factory() as session:
+                repository = self._repository_factory(session)
+                payment = await repository.find_by_id_for_update(payment_id)
+                if payment is None:
+                    raise PaymentNotFoundError(payment_id)
+                outcome = "already_delivered"
+                if payment.webhook_delivered_at is None:
+                    await webhook_client.send(payment)
+                    await repository.mark_webhook_delivered(payment)
+                    outcome = "delivered"
+        except Exception as error:
+            logger.warning(
+                "Webhook delivery failed",
+                extra={
+                    **fields,
+                    "outcome": "failed",
+                    "duration_ms": (perf_counter() - started) * 1000,
+                    "error_type": type(error).__name__,
+                },
+                exc_info=True,
+            )
+            raise
+        logger.info(
+            "Webhook delivery completed",
+            extra={
+                **fields,
+                "outcome": outcome,
+                "duration_ms": (perf_counter() - started) * 1000,
+            },
+        )
 
     async def _create_payment(
         self, request: PaymentCreateRequest, idempotency_key: str

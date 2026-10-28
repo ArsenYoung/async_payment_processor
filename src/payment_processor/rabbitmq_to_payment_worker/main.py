@@ -41,6 +41,9 @@ async def _consume() -> None:
                 await declare_payment_topology(broker)
                 await declare_retry_topology(broker)
                 await broker.start()
+                logging.getLogger(__name__).info(
+                    "Payment consumer ready", extra={"outcome": "ready"}
+                )
                 await asyncio.Event().wait()
             finally:
                 await broker.stop()

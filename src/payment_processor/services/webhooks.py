@@ -1,11 +1,16 @@
+import logging
 from math import isfinite
+from time import perf_counter
 from types import TracebackType
 from typing import Self
 
 import httpx
 
+from payment_processor.core.logging import processing_fields
 from payment_processor.db.models import Payment
 from payment_processor.messaging.schemas import PaymentResultPayload
+
+logger = logging.getLogger(__name__)
 
 
 class WebhookClient:
@@ -34,8 +39,32 @@ class WebhookClient:
         await self._client.__aexit__(exc_type, exc_value, traceback)
 
     async def send(self, payment: Payment) -> None:
-        payload = PaymentResultPayload.from_payment(payment)
-        response = await self._client.post(
-            payment.webhook_url, json=payload.model_dump(mode="json")
+        started = perf_counter()
+        fields = processing_fields(payment_id=str(payment.id), operation="webhook_http")
+        try:
+            payload = PaymentResultPayload.from_payment(payment)
+            response = await self._client.post(
+                payment.webhook_url, json=payload.model_dump(mode="json")
+            )
+            fields["status_code"] = response.status_code
+            response.raise_for_status()
+        except Exception as error:
+            logger.warning(
+                "Webhook HTTP request failed",
+                extra={
+                    **fields,
+                    "outcome": "failed",
+                    "duration_ms": (perf_counter() - started) * 1000,
+                    "error_type": type(error).__name__,
+                },
+                exc_info=True,
+            )
+            raise
+        logger.info(
+            "Webhook HTTP request completed",
+            extra={
+                **fields,
+                "outcome": "accepted",
+                "duration_ms": (perf_counter() - started) * 1000,
+            },
         )
-        response.raise_for_status()
