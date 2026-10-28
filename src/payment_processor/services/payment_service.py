@@ -13,6 +13,7 @@ from payment_processor.db.repositories.payments import (
     is_idempotency_key_violation,
 )
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
+from payment_processor.services.webhooks import WebhookClient
 
 
 class IdempotencyConflictError(Exception):
@@ -56,6 +57,19 @@ class PaymentService:
                 payment.status = await self._gateway.process()
                 payment.processed_at = datetime.now(UTC)
         return payment
+
+    async def deliver_webhook(
+        self, payment_id: UUID, webhook_client: WebhookClient
+    ) -> None:
+        async with self._session_scope_factory() as session:
+            repository = self._repository_factory(session)
+            payment = await repository.find_by_id_for_update(payment_id)
+            if payment is None:
+                raise LookupError(f"Payment {payment_id} not found")
+            if payment.webhook_delivered_at is not None:
+                return
+            await webhook_client.send(payment)
+            await repository.mark_webhook_delivered(payment)
 
     async def _create_payment(
         self, request: PaymentCreateRequest, idempotency_key: str
