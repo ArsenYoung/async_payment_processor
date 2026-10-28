@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from payment_processor.db.models import Outbox, Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
-from payment_processor.services.payments import PaymentService
+from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.mark.asyncio

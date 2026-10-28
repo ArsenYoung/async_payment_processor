@@ -12,19 +12,25 @@
 - подключение к PostgreSQL и RabbitMQ;
 - модели `Payment` и `Outbox`;
 - Alembic-миграция для таблиц `payments` и `outbox`;
-- endpoint `GET /health`;
-- публикатор Outbox с подтверждением RabbitMQ и корректной остановкой.
+- создание платежей через `POST /api/v1/payments` и получение через `GET /api/v1/payments/{payment_id}`;
+- идемпотентное создание платежа и атомарное сохранение платежа вместе с событием Outbox;
+- защита операций API и `GET /health` ключом `X-API-Key`, публичная документация с авторизацией в Swagger;
+- публикатор Outbox с подтверждением RabbitMQ и корректной остановкой;
+- эмулятор шлюза: задержка 2–5 секунд, 90% успешных и 10% неуспешных результатов;
+- обработка платежа в `PaymentService`: сохранение итогового статуса и времени обработки, защита от повторного вызова шлюза для завершённого платежа, включая конкурентные вызовы.
 
-В следующих блоках будут добавлены обработчик платежей в consumer, отправка webhook, retry и DLQ.
+Обработка платежа реализована на уровне сервиса. Подключение обработчика к consumer, отправка webhook, retry и DLQ остаются следующими шагами. Сейчас после POST событие попадает в `payments.new`, а платёж остаётся `pending`: consumer ещё не вызывает `PaymentService.process_payment()`.
 
 ## Фоновые процессы
 
 | Сервис Compose | Роль | Точка запуска |
 | --- | --- | --- |
 | `outbox-to-rabbitmq-worker` | Выбирает события из PostgreSQL Outbox, публикует в RabbitMQ и сохраняет результат отправки | `payment_processor.outbox_to_rabbitmq_worker.main` |
-| `rabbitmq-to-payment-worker` | Отдельный процесс для обработки сообщений `payments.new` | `payment_processor.rabbitmq_to_payment_worker.main` |
+| `rabbitmq-to-payment-worker` | Подключается к RabbitMQ и объявляет топологию; подписчик `payments.new` ещё не добавлен | `payment_processor.rabbitmq_to_payment_worker.main` |
 
-Воркеры используют один Docker-образ и запускаются отдельными командами. У каждого свои подключения и обработка сигналов остановки. Публикатор не зависит от запуска consumer. Сейчас consumer подключается к RabbitMQ и запускает инфраструктуру подписчиков; обработчик платежей будет добавлен следующим блоком.
+Воркеры используют один Docker-образ и запускаются отдельными командами. У каждого свои подключения и обработка сигналов остановки. Публикатор не зависит от запуска consumer.
+
+Платёж и событие Outbox создаются в одной транзакции. Публикатор отправляет устойчивое сообщение в очередь `payments.new` через direct exchange `payments` и отмечает событие опубликованным после подтверждения RabbitMQ. При сбое между подтверждением и commit возможна повторная публикация с тем же `event_id`; для завершённого платежа сервис повторно шлюз не вызывает.
 
 Настройки публикатора: `OUTBOX_BATCH_SIZE` — размер партии, `OUTBOX_POLL_INTERVAL` — пауза между партиями в секундах, `OUTBOX_PUBLISH_TIMEOUT` — таймаут публикации одного события в секундах. Значения по умолчанию: `100`, `1.0` и `5.0`; все значения должны быть положительными, интервалы и таймауты — конечными.
 
@@ -34,21 +40,28 @@
 src/payment_processor/
 ├── api/                         # HTTP API
 ├── core/                        # конфигурация приложения
-├── db/                          # подключение и модели PostgreSQL
-├── messaging/                   # подключение к RabbitMQ
+├── db/                          # модели, репозитории и сессии PostgreSQL
+├── messaging/                   # схемы событий и топология RabbitMQ
 ├── outbox_to_rabbitmq_worker/    # публикатор PostgreSQL Outbox → RabbitMQ
 ├── rabbitmq_to_payment_worker/  # обработчик сообщений
-└── services/                    # операции с платежами и публикация Outbox
+└── services/
+    ├── payment_service.py
+    ├── outbox_service.py
+    └── payment_gateway_simulator.py
 
 alembic/
 └── versions/     # миграции базы данных
 ```
 
+`PaymentService` объединяет создание, чтение и обработку платежа; проверка идемпотентности находится в его закрытых методах. `OutboxService` публикует сохранённые события в RabbitMQ. `PaymentGatewaySimulator` эмулирует внешний шлюз и передаётся в `PaymentService` как зависимость.
+
+При обработке сервис блокирует строку платежа через `SELECT … FOR UPDATE`, вызывает шлюз только для `pending` и сохраняет `succeeded` или `failed` вместе с `processed_at` в UTC. Блокировка удерживается до завершения транзакции. Конкурентный вызов для того же платежа ждёт и затем возвращает сохранённый результат. Техническая ошибка приводит к откату транзакции и передаётся вызывающему коду.
+
 ## Требования
 
 - Docker;
 - Docker Compose;
-- Python 3.12+ и Poetry — для локального запуска без Docker.
+- Python 3.12+ и Poetry — для миграций, тестов и локального запуска. В текущем Docker-образе нет файлов Alembic, поэтому миграции выполняются с хоста.
 
 ## Запуск через Docker Compose
 
@@ -60,11 +73,31 @@ cp .env.example .env
 
 Файл `.env` содержит локальные настройки и не добавляется в Git.
 
-Соберите образы и запустите сервисы:
+Установите зависимости для запуска миграций с хоста:
+
+```bash
+poetry install
+```
+
+Запустите PostgreSQL и RabbitMQ и дождитесь их готовности:
+
+```bash
+docker compose up -d --wait postgres rabbitmq
+```
+
+Примените миграции к БД из `DATABASE_URL` в `.env`. В шаблоне указан PostgreSQL на `localhost:5432`; при изменении имени БД или учётных данных обновите также `DATABASE_URL`.
+
+```bash
+poetry run alembic upgrade head
+```
+
+После миграций соберите образы и запустите API и воркеры:
 
 ```bash
 docker compose up -d --build
 ```
+
+Миграции при запуске контейнеров автоматически не применяются.
 
 Проверьте состояние контейнеров:
 
@@ -114,12 +147,87 @@ curl -H "X-API-Key: ${API_KEY}" http://localhost:8000/health
 {"status":"ok"}
 ```
 
+## API платежей
+
+### Создание платежа
+
+Для нового платежа нужны `X-API-Key` и `Idempotency-Key`. Задайте `API_KEY`, как показано выше, и выполните запрос:
+
+```bash
+export IDEMPOTENCY_KEY="demo-order-001"
+curl -i -X POST http://localhost:8000/api/v1/payments \
+  -H "X-API-Key: ${API_KEY}" \
+  -H "Idempotency-Key: ${IDEMPOTENCY_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":"10.50","currency":"RUB","description":"Оплата заказа","metadata":{"order_id":"demo-order-001"},"webhook_url":"https://example.com/webhook"}'
+```
+
+Первый запрос возвращает `202 Accepted`. Пример тела ответа; идентификатор и время будут другими:
+
+```json
+{
+  "payment_id": "d183f5bb-994a-4a68-a433-206ac244b3d2",
+  "status": "pending",
+  "created_at": "2026-10-28T10:00:00Z"
+}
+```
+
+Повтор с тем же ключом и теми же данными возвращает тот же платёж с кодом `202`, его текущим статусом и исходным `created_at`. Новые платёж и событие Outbox не создаются. Если данные изменились, сервер возвращает `409 Conflict`. Для другого платежа используйте новый ключ.
+
+### Получение платежа
+
+Скопируйте `payment_id` из ответа POST в переменную `PAYMENT_ID`:
+
+```bash
+export PAYMENT_ID="d183f5bb-994a-4a68-a433-206ac244b3d2"
+curl -i -H "X-API-Key: ${API_KEY}" \
+  "http://localhost:8000/api/v1/payments/${PAYMENT_ID}"
+```
+
+Успешный ответ — `200 OK`. Пример для созданного платежа:
+
+```json
+{
+  "payment_id": "d183f5bb-994a-4a68-a433-206ac244b3d2",
+  "status": "pending",
+  "created_at": "2026-10-28T10:00:00Z",
+  "amount": "10.50",
+  "currency": "RUB",
+  "description": "Оплата заказа",
+  "metadata": {"order_id": "demo-order-001"},
+  "idempotency_key": "demo-order-001",
+  "webhook_url": "https://example.com/webhook",
+  "processed_at": null
+}
+```
+
+Для GET заголовок `Idempotency-Key` не нужен. API поддерживает статусы `pending`, `succeeded`, `failed`; для завершённого платежа `processed_at` содержит время обработки. Автоматическое завершение платежей через consumer и доставка webhook пока не подключены.
+
+### Валидация и ошибки
+
+Сумма должна быть положительной, содержать не более 18 цифр и не более двух знаков после точки. Допустимые валюты: `RUB`, `USD`, `EUR`. Описание обязательно, от 1 до 500 символов. `metadata` — JSON-объект, по умолчанию `{}`. `webhook_url` обязателен: HTTP(S)-адрес длиной до 2048 символов. Дополнительные поля запроса отклоняются. `Idempotency-Key` — непустая строка длиной до 255 символов.
+
+| Код | Причина |
+| --- | --- |
+| `401 Unauthorized` | Отсутствует или неверен `X-API-Key` |
+| `404 Not Found` | В GET указан корректный UUID, но платёж не найден |
+| `409 Conflict` | Ключ идемпотентности уже использован с другими данными |
+| `422 Unprocessable Entity` | Неверное тело POST, отсутствует или некорректен `Idempotency-Key`, либо некорректен UUID в GET |
+
 ## Локальный запуск через Poetry
 
-Создайте виртуальное окружение и установите зависимости:
+Создайте `.env` из `.env.example`, если ещё не сделали этого, и установите зависимости:
 
 ```bash
 poetry install
+```
+
+PostgreSQL и RabbitMQ должны быть доступны по адресам из `.env`. Для локальных контейнеров используйте `docker compose up -d --wait postgres rabbitmq`.
+
+До запуска приложения примените миграции:
+
+```bash
+poetry run alembic upgrade head
 ```
 
 Запустите API:
@@ -127,8 +235,6 @@ poetry install
 ```bash
 poetry run uvicorn payment_processor.api.main:app --reload
 ```
-
-Для локального запуска без Docker PostgreSQL и RabbitMQ должны быть доступны по адресам из `.env`.
 
 Запустите публикатор Outbox в отдельном терминале:
 
@@ -173,13 +279,13 @@ poetry run alembic revision --autogenerate -m "describe schema change"
 Проверить стиль и ошибки в коде:
 
 ```bash
-poetry run ruff check src alembic
+poetry run ruff check .
 ```
 
 Проверить форматирование:
 
 ```bash
-poetry run ruff format --check src alembic
+poetry run ruff format --check .
 ```
 
 Проверить типы:
@@ -191,10 +297,14 @@ poetry run mypy
 Запустить тесты:
 
 ```bash
-poetry run pytest
+poetry run pytest -q
 ```
 
-Тесты включают проверки API, Outbox, RabbitMQ и жизненного цикла отдельных воркеров.
+Перед запуском тестов настройте `.env`, запустите PostgreSQL и RabbitMQ и примените миграции. Интеграционные тесты используют реальные подключения: часть создаёт записи с уникальными ключами в настроенной БД и удаляет их после проверки, часть — временные схемы PostgreSQL и отдельные очереди и обменники RabbitMQ.
+
+Покрыты создание и получение платежей, авторизация, валидация, идемпотентность и конкурентные запросы, атомарность платежа и Outbox, публикация и восстановление после сбоев, жизненный цикл API и воркеров. Тесты эмулятора проверяют задержки и оба результата без реального ожидания; тесты обработки — сохранение результата, повторные и конкурентные вызовы, откат при ошибках шлюза, commit и отмене задачи.
+
+После объединения сервисов полный запуск завершился успешно: **236 сценариев**. Сквозной сценарий с consumer и webhook будет добавлен вместе с их подключением.
 
 ## Полезные команды
 

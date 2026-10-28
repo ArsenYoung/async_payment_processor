@@ -28,9 +28,9 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
-from payment_processor.services import outbox as outbox_module
-from payment_processor.services.outbox import OutboxService, PublicationResult
-from payment_processor.services.payments import PaymentService
+from payment_processor.services import outbox_service as outbox_module
+from payment_processor.services.outbox_service import OutboxService, PublicationResult
+from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.fixture
