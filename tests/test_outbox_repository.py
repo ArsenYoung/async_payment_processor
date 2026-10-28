@@ -1,47 +1,19 @@
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import func, select
-from sqlalchemy.schema import CreateSchema, DropSchema
 
-from payment_processor.core.config import settings
 from payment_processor.db.models import (
     Outbox,
     OutboxEventType,
     Payment,
     PaymentCurrency,
 )
-from payment_processor.db.models.base import Base
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.db.session import Database
-
-
-@pytest_asyncio.fixture
-async def outbox_database() -> AsyncIterator[Database]:
-    schema = f"test_outbox_{uuid4().hex}"
-    database = Database(settings.database_url)
-    database.engine = database.engine.execution_options(
-        schema_translate_map={None: schema}
-    )
-    database.session_factory.configure(bind=database.engine)
-
-    try:
-        async with database.engine.begin() as connection:
-            await connection.execute(CreateSchema(schema))
-        try:
-            async with database.engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
-            yield database
-        finally:
-            async with database.engine.begin() as connection:
-                await connection.execute(DropSchema(schema, cascade=True))
-    finally:
-        await database.dispose()
 
 
 @pytest.mark.asyncio
