@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from payment_processor.core.config import settings
+from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
 from payment_processor.db.session import Database
 from payment_processor.messaging.broker import create_broker
@@ -36,6 +37,7 @@ async def _consume() -> None:
                     retry_policy=RetryPolicy(base_delay=settings.retry_base_delay),
                 )
                 await broker.connect()
+                configure_library_logging()
                 await declare_payment_topology(broker)
                 await declare_retry_topology(broker)
                 await broker.start()
@@ -47,8 +49,12 @@ async def _consume() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_consumer())
+    configure_logging("rabbitmq-to-payment-worker", settings)
+    try:
+        asyncio.run(run_consumer())
+    except Exception:
+        logging.getLogger(__name__).exception("Payment consumer failed")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

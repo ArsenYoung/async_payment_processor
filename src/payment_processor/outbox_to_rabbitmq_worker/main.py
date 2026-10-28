@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from payment_processor.core.config import settings
+from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
 from payment_processor.db.session import Database
 from payment_processor.messaging.broker import create_broker
@@ -20,6 +21,7 @@ async def _publish() -> None:
         broker = create_broker()
         try:
             await broker.connect()
+            configure_library_logging()
             await declare_payment_topology(broker)
             service = OutboxService(database.session_scope, broker)
             await service.run(
@@ -34,8 +36,12 @@ async def _publish() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_publisher())
+    configure_logging("outbox-to-rabbitmq-worker", settings)
+    try:
+        asyncio.run(run_publisher())
+    except Exception:
+        logging.getLogger(__name__).exception("Outbox publisher failed")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
