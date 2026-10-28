@@ -75,11 +75,12 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  consumer:
+  rabbitmq-to-payment-worker:
+    image: payment-processing-worker:local
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "payment_processor.consumer.main"]
+    command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/

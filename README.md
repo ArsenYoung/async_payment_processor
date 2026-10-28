@@ -22,9 +22,9 @@
 | Сервис Compose | Роль | Точка запуска |
 | --- | --- | --- |
 | `outbox-to-rabbitmq-worker` | Выбирает события из PostgreSQL Outbox, публикует в RabbitMQ и сохраняет результат отправки | `payment_processor.outbox_to_rabbitmq_worker.main` |
-| `consumer` | Заготовка подключения к RabbitMQ | `payment_processor.consumer.main` |
+| `rabbitmq-to-payment-worker` | Отдельный процесс для обработки сообщений `payments.new` | `payment_processor.rabbitmq_to_payment_worker.main` |
 
-Публикатор запускается отдельным процессом, обрабатывает сигналы остановки и не зависит от запуска consumer. Сейчас consumer остаётся заготовкой подключения к RabbitMQ; его отдельный жизненный цикл будет добавлен следующим коммитом, а обработчик платежей — в блоке 6.
+Воркеры используют один Docker-образ и запускаются отдельными командами. У каждого свои подключения и обработка сигналов остановки. Публикатор не зависит от запуска consumer. Сейчас consumer подключается к RabbitMQ и запускает инфраструктуру подписчиков; обработчик платежей будет добавлен следующим блоком.
 
 Настройки публикатора: `OUTBOX_BATCH_SIZE` — размер партии, `OUTBOX_POLL_INTERVAL` — пауза между партиями в секундах, `OUTBOX_PUBLISH_TIMEOUT` — таймаут публикации одного события в секундах. Значения по умолчанию: `100`, `1.0` и `5.0`; все значения должны быть положительными, интервалы и таймауты — конечными.
 
@@ -37,7 +37,7 @@ src/payment_processor/
 ├── db/                          # подключение и модели PostgreSQL
 ├── messaging/                   # подключение к RabbitMQ
 ├── outbox_to_rabbitmq_worker/    # публикатор PostgreSQL Outbox → RabbitMQ
-├── consumer/                    # заготовка получателя сообщений
+├── rabbitmq_to_payment_worker/  # обработчик сообщений
 └── services/                    # операции с платежами и публикация Outbox
 
 alembic/
@@ -78,7 +78,7 @@ docker compose ps
 - RabbitMQ — `healthy`;
 - API — `healthy`;
 - `outbox-to-rabbitmq-worker` — запущен;
-- `consumer` — запущен.
+- `rabbitmq-to-payment-worker` — запущен.
 
 Остановить сервисы:
 
@@ -139,7 +139,7 @@ poetry run python -m payment_processor.outbox_to_rabbitmq_worker.main
 Запустите consumer в другом терминале:
 
 ```bash
-poetry run python -m payment_processor.consumer.main
+poetry run python -m payment_processor.rabbitmq_to_payment_worker.main
 ```
 
 ## Миграции базы данных
@@ -209,5 +209,5 @@ poetry check --lock
 ```bash
 docker compose logs -f api
 docker compose logs -f outbox-to-rabbitmq-worker
-docker compose logs -f consumer
+docker compose logs -f rabbitmq-to-payment-worker
 ```
