@@ -1,10 +1,11 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_processor.db.models import Outbox, OutboxEventType, Payment
+from payment_processor.db.models import Outbox, OutboxEventType, Payment, PaymentStatus
 from payment_processor.messaging.schemas import PaymentCreatedPayload
 
 
@@ -26,6 +27,13 @@ class PaymentRepository:
             select(Payment).where(Payment.idempotency_key == idempotency_key)
         )
         return result.scalar_one_or_none()
+
+    async def mark_webhook_delivered(self, payment: Payment) -> None:
+        if payment.status == PaymentStatus.PENDING or payment.processed_at is None:
+            raise ValueError("Webhook delivery requires a completed payment")
+        if payment.webhook_delivered_at is None:
+            payment.webhook_delivered_at = datetime.now(UTC)
+            await self.session.flush()
 
     async def save_with_outbox(self, payment: Payment) -> Payment:
         self.session.add(payment)
