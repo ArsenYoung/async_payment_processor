@@ -21,6 +21,7 @@ from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.retry import RetryPolicy
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
@@ -28,6 +29,13 @@ from payment_processor.rabbitmq_to_payment_worker.handlers import (
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
+
+
+@pytest.fixture(autouse=True)
+def routed_failure(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    route = AsyncMock()
+    monkeypatch.setattr(topology, "publish_failed_payment", route)
+    return route
 
 
 @pytest.fixture
@@ -76,7 +84,9 @@ async def test_subscriber_processes_before_delivering_webhook(
     service = Mock(spec=PaymentService)
     webhook = Mock(spec=WebhookClient)
     broker = create_broker()
-    register_payment_subscriber(broker, service, webhook)
+    register_payment_subscriber(
+        broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+    )
 
     async with RabbitTestBroker(broker):
         await _publish(broker, payment_event)
@@ -89,8 +99,8 @@ async def test_subscriber_processes_before_delivering_webhook(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["processing", "delivery"])
-async def test_subscriber_propagates_dependency_errors(
-    payment_event: PaymentCreatedEvent, stage: str
+async def test_subscriber_routes_dependency_errors_to_dlq(
+    payment_event: PaymentCreatedEvent, stage: str, routed_failure: AsyncMock
 ) -> None:
     service = Mock(spec=PaymentService)
     webhook = Mock(spec=WebhookClient)
@@ -100,13 +110,15 @@ async def test_subscriber_propagates_dependency_errors(
     )
     operation.side_effect = error
     broker = create_broker()
-    register_payment_subscriber(broker, service, webhook)
+    register_payment_subscriber(
+        broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+    )
 
     async with RabbitTestBroker(broker):
-        with pytest.raises(RuntimeError) as caught:
-            await _publish(broker, payment_event)
+        await _publish(broker, payment_event)
 
-    assert caught.value is error
+    assert routed_failure.await_args.kwargs["error"] is error
+    assert routed_failure.await_args.kwargs["retry"] is None
     if stage == "processing":
         service.deliver_webhook.assert_not_awaited()
 
@@ -114,7 +126,7 @@ async def test_subscriber_propagates_dependency_errors(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["event_id", "event_type", "payment_id", "amount"])
 async def test_invalid_event_is_rejected_before_processing(
-    payment_event: PaymentCreatedEvent, field: str
+    payment_event: PaymentCreatedEvent, field: str, routed_failure: AsyncMock
 ) -> None:
     body = payment_event.model_dump(mode="json")
     if field in ("event_id", "event_type"):
@@ -123,11 +135,18 @@ async def test_invalid_event_is_rejected_before_processing(
         body["payload"][field] = "invalid" if field == "payment_id" else "0"
     service = Mock(spec=PaymentService)
     broker = create_broker()
-    register_payment_subscriber(broker, service, Mock(spec=WebhookClient))
+    register_payment_subscriber(
+        broker,
+        service,
+        Mock(spec=WebhookClient),
+        retry_policy=RetryPolicy(base_delay=0.01),
+    )
 
     async with RabbitTestBroker(broker):
-        with pytest.raises(ValidationError):
-            await _publish(broker, body)
+        await _publish(broker, body)
+
+    assert routed_failure.await_args.kwargs["reason"] == "invalid_message"
+    assert routed_failure.await_args.kwargs["retry"] is None
 
     service.process_payment.assert_not_awaited()
     service.deliver_webhook.assert_not_awaited()
@@ -176,7 +195,9 @@ async def test_event_commits_result_then_delivers_saved_data(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         async with RabbitTestBroker(broker):
             await _publish(broker, body)
 
@@ -194,17 +215,23 @@ async def test_event_commits_result_then_delivers_saved_data(
 
 @pytest.mark.asyncio
 async def test_unknown_payment_does_not_call_gateway_or_webhook(
-    outbox_database: Database, payment_event: PaymentCreatedEvent
+    outbox_database: Database,
+    payment_event: PaymentCreatedEvent,
+    routed_failure: AsyncMock,
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     webhook = Mock(spec=WebhookClient)
     service = PaymentService(outbox_database.session_scope, gateway=gateway)
     broker = create_broker()
-    register_payment_subscriber(broker, service, webhook)
+    register_payment_subscriber(
+        broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+    )
 
     async with RabbitTestBroker(broker):
-        with pytest.raises(LookupError, match=str(payment_event.payload.payment_id)):
-            await _publish(broker, payment_event)
+        await _publish(broker, payment_event)
+
+    assert isinstance(routed_failure.await_args.kwargs["error"], LookupError)
+    assert routed_failure.await_args.kwargs["retry"] is None
 
     gateway.process.assert_not_awaited()
     webhook.send.assert_not_awaited()
@@ -212,7 +239,9 @@ async def test_unknown_payment_does_not_call_gateway_or_webhook(
 
 @pytest.mark.asyncio
 async def test_gateway_error_leaves_payment_pending_without_webhook(
-    outbox_database: Database, saved_event: PaymentCreatedEvent
+    outbox_database: Database,
+    saved_event: PaymentCreatedEvent,
+    routed_failure: AsyncMock,
 ) -> None:
     error = RuntimeError("Gateway unavailable")
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
@@ -220,13 +249,15 @@ async def test_gateway_error_leaves_payment_pending_without_webhook(
     webhook = Mock(spec=WebhookClient)
     service = PaymentService(outbox_database.session_scope, gateway=gateway)
     broker = create_broker()
-    register_payment_subscriber(broker, service, webhook)
+    register_payment_subscriber(
+        broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+    )
 
     async with RabbitTestBroker(broker):
-        with pytest.raises(RuntimeError) as caught:
-            await _publish(broker, saved_event)
+        await _publish(broker, saved_event)
 
-    assert caught.value is error
+    assert routed_failure.await_args.kwargs["error"] is error
+    assert routed_failure.await_args.kwargs["retry"] is None
     webhook.send.assert_not_awaited()
     async with outbox_database.session_scope() as session:
         payment = await session.get(Payment, saved_event.payload.payment_id)
@@ -244,6 +275,7 @@ async def test_webhook_failure_preserves_committed_payment_result(
     saved_event: PaymentCreatedEvent,
     status: PaymentStatus,
     failure: str,
+    routed_failure: AsyncMock,
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
@@ -262,10 +294,13 @@ async def test_webhook_failure_preserves_committed_payment_result(
     transport = httpx.MockTransport(AsyncMock(side_effect=handle))
     broker = create_broker()
     async with WebhookClient(timeout=1.0, transport=transport) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         async with RabbitTestBroker(broker):
-            with pytest.raises(error_type):
-                await _publish(broker, saved_event)
+            await _publish(broker, saved_event)
+            assert isinstance(routed_failure.await_args.kwargs["error"], error_type)
+            assert routed_failure.await_args.kwargs["retry"].number == 2
 
     gateway.process.assert_awaited_once_with()
     async with outbox_database.session_scope() as session:
@@ -290,7 +325,9 @@ async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         async with RabbitTestBroker(broker):
             await _publish(broker, saved_event)
             async with outbox_database.session_scope() as session:
@@ -321,6 +358,7 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
     saved_event: PaymentCreatedEvent,
     status: PaymentStatus,
     failure: str,
+    routed_failure: AsyncMock,
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
@@ -344,10 +382,13 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         async with RabbitTestBroker(broker):
-            with pytest.raises(error_type):
-                await _publish(broker, saved_event)
+            await _publish(broker, saved_event)
+            assert isinstance(routed_failure.await_args.kwargs["error"], error_type)
+            assert routed_failure.await_args.kwargs["retry"].number == 2
 
             async with outbox_database.session_scope() as session:
                 failed_delivery = await session.get(
@@ -384,7 +425,10 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
-    outbox_database: Database, saved_event: PaymentCreatedEvent, status: PaymentStatus
+    outbox_database: Database,
+    saved_event: PaymentCreatedEvent,
+    status: PaymentStatus,
+    routed_failure: AsyncMock,
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
@@ -415,11 +459,13 @@ async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         async with RabbitTestBroker(broker):
-            with pytest.raises(OperationalError) as caught:
-                await _publish(broker, saved_event)
-            assert caught.value is error
+            await _publish(broker, saved_event)
+            assert routed_failure.await_args.kwargs["error"] is error
+            assert routed_failure.await_args.kwargs["retry"].number == 2
             handle.assert_awaited_once()
 
             async with outbox_database.session_scope() as session:
@@ -515,7 +561,9 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        register_payment_subscriber(broker, service, webhook)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
+        )
         try:
             await broker.connect()
             declared_exchange = await broker.declare_exchange(exchange)

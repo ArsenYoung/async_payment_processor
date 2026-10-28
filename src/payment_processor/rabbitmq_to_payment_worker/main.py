@@ -5,7 +5,11 @@ from payment_processor.core.config import settings
 from payment_processor.core.worker import run_worker
 from payment_processor.db.session import Database
 from payment_processor.messaging.broker import create_broker
-from payment_processor.messaging.topology import declare_payment_topology
+from payment_processor.messaging.retry import RetryPolicy
+from payment_processor.messaging.topology import (
+    declare_payment_topology,
+    declare_retry_topology,
+)
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
@@ -25,9 +29,15 @@ async def _consume() -> None:
             payment_service = PaymentService(database.session_scope)
             broker = create_broker()
             try:
-                register_payment_subscriber(broker, payment_service, webhook_client)
+                register_payment_subscriber(
+                    broker,
+                    payment_service,
+                    webhook_client,
+                    retry_policy=RetryPolicy(base_delay=settings.retry_base_delay),
+                )
                 await broker.connect()
                 await declare_payment_topology(broker)
+                await declare_retry_topology(broker)
                 await broker.start()
                 await asyncio.Event().wait()
             finally:

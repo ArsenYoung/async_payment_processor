@@ -17,6 +17,7 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         connect=AsyncMock(), start=AsyncMock(), stop=AsyncMock(), publish=AsyncMock()
     )
     declare = AsyncMock()
+    declare_retry = AsyncMock()
     webhook = MagicMock(spec=WebhookClient)
     webhook.__aenter__.return_value = webhook
     webhook_factory = Mock(return_value=webhook)
@@ -32,6 +33,7 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(consumer_main, "Database", Mock(return_value=database))
     monkeypatch.setattr(consumer_main, "create_broker", Mock(return_value=broker))
     monkeypatch.setattr(consumer_main, "declare_payment_topology", declare)
+    monkeypatch.setattr(consumer_main, "declare_retry_topology", declare_retry)
     monkeypatch.setattr(consumer_main, "WebhookClient", webhook_factory)
     monkeypatch.setattr(consumer_main, "PaymentService", service_factory)
     monkeypatch.setattr(consumer_main, "register_payment_subscriber", register)
@@ -39,12 +41,14 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     operations.attach_mock(database, "database")
     operations.attach_mock(broker, "broker")
     operations.attach_mock(declare, "declare")
+    operations.attach_mock(declare_retry, "declare_retry")
     operations.attach_mock(webhook, "webhook")
     operations.attach_mock(register, "register")
     return SimpleNamespace(
         database=database,
         broker=broker,
         declare=declare,
+        declare_retry=declare_retry,
         webhook=webhook,
         webhook_factory=webhook_factory,
         service=service,
@@ -89,9 +93,15 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
     assert runtime.operations.mock_calls == [
         call.database.check_connection(),
         call.webhook.__aenter__(),
-        call.register(runtime.broker, runtime.service, runtime.webhook),
+        call.register(
+            runtime.broker,
+            runtime.service,
+            runtime.webhook,
+            retry_policy=runtime.register.call_args.kwargs["retry_policy"],
+        ),
         call.broker.connect(),
         call.declare(runtime.broker),
+        call.declare_retry(runtime.broker),
         call.broker.start(),
         call.broker.stop(),
         call.webhook.__aexit__(
@@ -101,6 +111,8 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
         ),
         call.database.dispose(),
     ]
+    policy = runtime.register.call_args.kwargs["retry_policy"]
+    assert policy.next_retry(1).delay == consumer_main.settings.retry_base_delay
     runtime.webhook_factory.assert_called_once_with(
         timeout=consumer_main.settings.webhook_timeout
     )
@@ -116,6 +128,7 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
         "registration",
         "broker",
         "topology",
+        "retry-topology",
         "subscribers",
         "broker-stop",
         "webhook-exit",
@@ -133,6 +146,7 @@ async def test_consumer_failure_closes_opened_resources(
         "registration": runtime.register,
         "broker": runtime.broker.connect,
         "topology": runtime.declare,
+        "retry-topology": runtime.declare_retry,
         "subscribers": runtime.broker.start,
         "broker-stop": runtime.broker.stop,
         "webhook-exit": runtime.webhook.__aexit__,
@@ -162,7 +176,15 @@ async def test_consumer_failure_closes_opened_resources(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "stage", ["database", "webhook-enter", "broker", "topology", "subscribers"]
+    "stage",
+    [
+        "database",
+        "webhook-enter",
+        "broker",
+        "topology",
+        "retry-topology",
+        "subscribers",
+    ],
 )
 async def test_cancellation_during_consumer_startup_closes_opened_resources(
     consumer_runtime: SimpleNamespace, stage: str
@@ -180,6 +202,7 @@ async def test_cancellation_during_consumer_startup_closes_opened_resources(
         "webhook-enter": runtime.webhook.__aenter__,
         "broker": runtime.broker.connect,
         "topology": runtime.declare,
+        "retry-topology": runtime.declare_retry,
         "subscribers": runtime.broker.start,
     }[stage]
     operation.side_effect = stalled
