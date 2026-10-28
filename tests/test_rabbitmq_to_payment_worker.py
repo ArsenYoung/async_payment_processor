@@ -1,11 +1,13 @@
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call
 
 import pytest
 
 from payment_processor.db.session import Database
 from payment_processor.rabbitmq_to_payment_worker import main as consumer_main
+from payment_processor.services.payment_service import PaymentService
+from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.fixture
@@ -15,6 +17,12 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         connect=AsyncMock(), start=AsyncMock(), stop=AsyncMock(), publish=AsyncMock()
     )
     declare = AsyncMock()
+    webhook = MagicMock(spec=WebhookClient)
+    webhook.__aenter__.return_value = webhook
+    webhook_factory = Mock(return_value=webhook)
+    service = Mock(spec=PaymentService)
+    service_factory = Mock(return_value=service)
+    register = Mock()
     entered = asyncio.Event()
 
     async def start() -> None:
@@ -24,14 +32,24 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(consumer_main, "Database", Mock(return_value=database))
     monkeypatch.setattr(consumer_main, "create_broker", Mock(return_value=broker))
     monkeypatch.setattr(consumer_main, "declare_payment_topology", declare)
+    monkeypatch.setattr(consumer_main, "WebhookClient", webhook_factory)
+    monkeypatch.setattr(consumer_main, "PaymentService", service_factory)
+    monkeypatch.setattr(consumer_main, "register_payment_subscriber", register)
     operations = Mock()
     operations.attach_mock(database, "database")
     operations.attach_mock(broker, "broker")
     operations.attach_mock(declare, "declare")
+    operations.attach_mock(webhook, "webhook")
+    operations.attach_mock(register, "register")
     return SimpleNamespace(
         database=database,
         broker=broker,
         declare=declare,
+        webhook=webhook,
+        webhook_factory=webhook_factory,
+        service=service,
+        service_factory=service_factory,
+        register=register,
         entered=entered,
         operations=operations,
     )
@@ -70,12 +88,23 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
 
     assert runtime.operations.mock_calls == [
         call.database.check_connection(),
+        call.webhook.__aenter__(),
+        call.register(runtime.broker, runtime.service, runtime.webhook),
         call.broker.connect(),
         call.declare(runtime.broker),
         call.broker.start(),
         call.broker.stop(),
+        call.webhook.__aexit__(
+            asyncio.CancelledError,
+            runtime.webhook.__aexit__.call_args.args[1],
+            runtime.webhook.__aexit__.call_args.args[2],
+        ),
         call.database.dispose(),
     ]
+    runtime.webhook_factory.assert_called_once_with(
+        timeout=consumer_main.settings.webhook_timeout
+    )
+    runtime.service_factory.assert_called_once_with(runtime.database.session_scope)
 
 
 @pytest.mark.asyncio
@@ -83,10 +112,13 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
     "stage",
     [
         "database",
+        "webhook-enter",
+        "registration",
         "broker",
         "topology",
         "subscribers",
         "broker-stop",
+        "webhook-exit",
         "database-dispose",
     ],
 )
@@ -97,17 +129,20 @@ async def test_consumer_failure_closes_opened_resources(
     error = RuntimeError(f"Failure during {stage}")
     operation = {
         "database": runtime.database.check_connection,
+        "webhook-enter": runtime.webhook.__aenter__,
+        "registration": runtime.register,
         "broker": runtime.broker.connect,
         "topology": runtime.declare,
         "subscribers": runtime.broker.start,
         "broker-stop": runtime.broker.stop,
+        "webhook-exit": runtime.webhook.__aexit__,
         "database-dispose": runtime.database.dispose,
     }[stage]
     operation.side_effect = error
     task = asyncio.create_task(consumer_main._consume())
     try:
         async with asyncio.timeout(2):
-            if stage in ("broker-stop", "database-dispose"):
+            if stage in ("broker-stop", "webhook-exit", "database-dispose"):
                 await runtime.entered.wait()
                 task.cancel()
             with pytest.raises(RuntimeError) as caught:
@@ -117,14 +152,18 @@ async def test_consumer_failure_closes_opened_resources(
 
     assert caught.value is error
     runtime.database.dispose.assert_awaited_once_with()
-    if stage == "database":
+    if stage in ("database", "webhook-enter"):
         runtime.broker.stop.assert_not_awaited()
+        runtime.webhook.__aexit__.assert_not_awaited()
     else:
         runtime.broker.stop.assert_awaited_once_with()
+        runtime.webhook.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["database", "broker", "topology", "subscribers"])
+@pytest.mark.parametrize(
+    "stage", ["database", "webhook-enter", "broker", "topology", "subscribers"]
+)
 async def test_cancellation_during_consumer_startup_closes_opened_resources(
     consumer_runtime: SimpleNamespace, stage: str
 ) -> None:
@@ -138,6 +177,7 @@ async def test_cancellation_during_consumer_startup_closes_opened_resources(
 
     operation = {
         "database": runtime.database.check_connection,
+        "webhook-enter": runtime.webhook.__aenter__,
         "broker": runtime.broker.connect,
         "topology": runtime.declare,
         "subscribers": runtime.broker.start,
@@ -154,10 +194,12 @@ async def test_cancellation_during_consumer_startup_closes_opened_resources(
         await _finish_task(task)
 
     runtime.database.dispose.assert_awaited_once_with()
-    if stage == "database":
+    if stage in ("database", "webhook-enter"):
         runtime.broker.stop.assert_not_awaited()
+        runtime.webhook.__aexit__.assert_not_awaited()
     else:
         runtime.broker.stop.assert_awaited_once_with()
+        runtime.webhook.__aexit__.assert_awaited_once()
 
 
 async def _finish_task(task: asyncio.Task) -> None:

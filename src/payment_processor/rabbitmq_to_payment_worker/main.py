@@ -6,6 +6,11 @@ from payment_processor.core.worker import run_worker
 from payment_processor.db.session import Database
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.topology import declare_payment_topology
+from payment_processor.rabbitmq_to_payment_worker.handlers import (
+    register_payment_subscriber,
+)
+from payment_processor.services.payment_service import PaymentService
+from payment_processor.services.webhooks import WebhookClient
 
 
 async def run_consumer() -> None:
@@ -16,14 +21,17 @@ async def _consume() -> None:
     database = Database(settings.database_url)
     try:
         await database.check_connection()
-        broker = create_broker()
-        try:
-            await broker.connect()
-            await declare_payment_topology(broker)
-            await broker.start()
-            await asyncio.Event().wait()
-        finally:
-            await broker.stop()
+        async with WebhookClient(timeout=settings.webhook_timeout) as webhook_client:
+            payment_service = PaymentService(database.session_scope)
+            broker = create_broker()
+            try:
+                register_payment_subscriber(broker, payment_service, webhook_client)
+                await broker.connect()
+                await declare_payment_topology(broker)
+                await broker.start()
+                await asyncio.Event().wait()
+            finally:
+                await broker.stop()
     finally:
         await database.dispose()
 

@@ -87,3 +87,7 @@ class Payment(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    webhook_delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )

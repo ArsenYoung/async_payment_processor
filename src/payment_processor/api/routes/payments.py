@@ -11,8 +11,10 @@ from payment_processor.api.schemas.payment import (
     PaymentDetailsResponse,
 )
 from payment_processor.api.schemas.validation import validate_database_text
-from payment_processor.services.idempotency import IdempotencyConflictError
-from payment_processor.services.payments import PaymentService
+from payment_processor.services.payment_service import (
+    IdempotencyConflictError,
+    PaymentService,
+)
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 

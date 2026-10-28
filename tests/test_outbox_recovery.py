@@ -18,8 +18,8 @@ from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.outbox import OutboxService, PublicationResult
-from payment_processor.services.payments import PaymentService
+from payment_processor.services.outbox_service import OutboxService, PublicationResult
+from payment_processor.services.payment_service import PaymentService
 
 
 @pytest_asyncio.fixture
