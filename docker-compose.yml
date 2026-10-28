@@ -56,6 +56,25 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  outbox-to-rabbitmq-worker:
+    image: payment-processing-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "payment_processor.outbox_to_rabbitmq_worker.main"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
+      OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1.0}
+      OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   consumer:
     build:
       context: .

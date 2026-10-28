@@ -1,13 +1,24 @@
+import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
 from faststream.rabbit import RabbitBroker
+from sqlalchemy.exc import (
+    DBAPIError,
+    DisconnectionError,
+    InterfaceError,
+    OperationalError,
+)
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.messaging.topology import publish_payment_event
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -28,6 +39,35 @@ class OutboxService:
         self._session_scope_factory = session_scope_factory
         self._broker = broker
         self._repository_factory = repository_factory
+
+    async def run(
+        self, *, batch_size: int, poll_interval: float, publish_timeout: float
+    ) -> None:
+        while True:
+            try:
+                result = await self.publish_batch(batch_size, timeout=publish_timeout)
+            except (
+                DBAPIError,
+                DisconnectionError,
+                DatabaseTimeoutError,
+                OSError,
+            ) as error:
+                if isinstance(error, DBAPIError) and not (
+                    error.connection_invalidated
+                    or isinstance(error, (OperationalError, InterfaceError))
+                ):
+                    raise
+                logger.exception("Outbox database unavailable; retrying after pause")
+            else:
+                if result.failed:
+                    logger.warning(
+                        "Outbox batch: %d published, %d failed",
+                        result.published,
+                        result.failed,
+                    )
+                elif result.published:
+                    logger.info("Outbox batch: %d published", result.published)
+            await asyncio.sleep(poll_interval)
 
     async def publish_batch(
         self, limit: int, *, timeout: float = 5.0
