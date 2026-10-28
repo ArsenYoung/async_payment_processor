@@ -7,6 +7,10 @@ from fastapi.exceptions import RequestValidationError
 
 from payment_processor.api.dependencies import require_api_key
 from payment_processor.api.exception_handlers import request_validation_error_handler
+from payment_processor.api.middleware import (
+    RequestLoggingMiddleware,
+    unhandled_error_response,
+)
 from payment_processor.api.routes.payments import router as payments_router
 from payment_processor.core.config import settings
 from payment_processor.core.logging import configure_library_logging, configure_logging
@@ -51,6 +55,8 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.add_exception_handler(
         RequestValidationError, request_validation_error_handler
     )
+    application.add_exception_handler(Exception, unhandled_error_response)
+    application.add_middleware(RequestLoggingMiddleware)
     application.include_router(payments_router, prefix="/api/v1")
     application.add_api_route("/health", healthcheck, methods=["GET"], tags=["health"])
     return application

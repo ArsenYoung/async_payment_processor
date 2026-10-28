@@ -136,6 +136,19 @@ class ApplicationFormatter(logging.Formatter):
             "logger": self._redact(record.name),
             "message": self._message(record),
         }
+        for field in (
+            "request_id",
+            "method",
+            "path",
+            "status_code",
+            "duration_ms",
+            "payment_id",
+        ):
+            value = getattr(record, field, None)
+            if isinstance(value, str):
+                entry[field] = self._redact(value)
+            elif isinstance(value, (int, float)):
+                entry[field] = value
         if record.exc_info and record.exc_info[1] is not None:
             entry["exception"] = self._exception(record.exc_info[1], set())
         return json.dumps(entry, ensure_ascii=True)
