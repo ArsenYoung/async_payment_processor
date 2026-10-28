@@ -12,6 +12,7 @@ from payment_processor.db.repositories.payments import (
     PaymentRepository,
     is_idempotency_key_violation,
 )
+from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.webhooks import WebhookClient
 
@@ -52,7 +53,7 @@ class PaymentService:
             repository = self._repository_factory(session)
             payment = await repository.find_by_id_for_update(payment_id)
             if payment is None:
-                raise LookupError(f"Payment {payment_id} not found")
+                raise PaymentNotFoundError(payment_id)
             if payment.status == PaymentStatus.PENDING:
                 payment.status = await self._gateway.process()
                 payment.processed_at = datetime.now(UTC)
@@ -65,7 +66,7 @@ class PaymentService:
             repository = self._repository_factory(session)
             payment = await repository.find_by_id_for_update(payment_id)
             if payment is None:
-                raise LookupError(f"Payment {payment_id} not found")
+                raise PaymentNotFoundError(payment_id)
             if payment.webhook_delivered_at is not None:
                 return
             await webhook_client.send(payment)
