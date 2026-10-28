@@ -1,21 +1,34 @@
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from copy import copy
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
+from faststream import BaseMiddleware
+from faststream.rabbit import RabbitBroker
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.main import create_app
+from payment_processor.api.schemas.payment import PaymentCreateRequest
 from payment_processor.core.config import settings
 from payment_processor.db.models import Outbox, Payment
 from payment_processor.db.models.base import Base
 from payment_processor.db.session import Database
+from payment_processor.messaging import topology
+from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.retry import RetryPolicy
+from payment_processor.messaging.schemas import PaymentCreatedEvent
+from payment_processor.rabbitmq_to_payment_worker.handlers import (
+    register_payment_subscriber,
+)
 from payment_processor.services.payment_service import PaymentService
+from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest_asyncio.fixture
@@ -48,6 +61,84 @@ async def outbox_database() -> AsyncIterator[Database]:
                 await connection.execute(DropSchema(schema, cascade=True))
     finally:
         await database.dispose()
+
+
+@pytest_asyncio.fixture
+async def routing_broker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[RabbitBroker]:
+    prefix = f"test-retry-{uuid4()}-"
+    exchange = copy(topology.PAYMENTS_EXCHANGE)
+    queue = copy(topology.PAYMENTS_NEW_QUEUE)
+    exchange.name = prefix + exchange.name
+    queue.name = prefix + queue.name
+    monkeypatch.setattr(topology, "PAYMENTS_EXCHANGE", exchange)
+    monkeypatch.setattr(topology, "PAYMENTS_NEW_QUEUE", queue)
+    broker = create_broker()
+    try:
+        await broker.connect()
+        await topology.declare_payment_topology(broker)
+        await topology.declare_retry_topology(broker)
+        yield broker
+    finally:
+        try:
+            for definition in (
+                topology.retry_queue(2),
+                topology.retry_queue(3),
+                topology.dead_letter_queue(),
+                queue,
+            ):
+                declared = await broker.declare_queue(definition)
+                await declared.delete(if_unused=False, if_empty=False)
+            for definition in (
+                topology.retry_exchange(),
+                topology.dead_letter_exchange(),
+                exchange,
+            ):
+                declared = await broker.declare_exchange(definition)
+                await declared.delete(if_unused=False)
+        finally:
+            await broker.stop()
+
+
+@pytest_asyncio.fixture
+async def retry_event(
+    outbox_database: Database, payment_payload: dict
+) -> PaymentCreatedEvent:
+    payment = await PaymentService(outbox_database.session_scope).create_payment(
+        PaymentCreateRequest.model_validate(payment_payload), f"retry-{uuid4()}"
+    )
+    async with outbox_database.session_scope() as session:
+        outbox = await session.scalar(
+            select(Outbox).where(Outbox.payment_id == payment.id)
+        )
+        assert outbox is not None
+        return PaymentCreatedEvent.from_outbox(outbox)
+
+
+@pytest.fixture
+def retry_consumer(routing_broker: RabbitBroker) -> Callable:
+    @asynccontextmanager
+    async def start(service: PaymentService, webhook: WebhookClient) -> AsyncIterator:
+        deliveries = []
+
+        class ObserveDelivery(BaseMiddleware):
+            async def on_receive(self) -> None:
+                deliveries.append(self.msg)
+
+        broker = create_broker()
+        broker.add_middleware(ObserveDelivery)
+        register_payment_subscriber(
+            broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.1)
+        )
+        try:
+            await broker.connect()
+            await broker.start()
+            yield broker, deliveries
+        finally:
+            await broker.stop()
+
+    return start
 
 
 @pytest.fixture

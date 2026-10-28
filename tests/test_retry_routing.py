@@ -1,6 +1,4 @@
 import asyncio
-from collections.abc import AsyncIterator
-from copy import copy
 from datetime import datetime
 from time import monotonic
 from unittest.mock import AsyncMock, Mock
@@ -63,44 +61,6 @@ async def payment_message(payment_event: PaymentCreatedEvent) -> RabbitMessage:
         headers={"custom": "preserved"},
     )
     return await AioPikaParser().parse_message(incoming)
-
-
-@pytest_asyncio.fixture
-async def routing_broker(
-    monkeypatch: pytest.MonkeyPatch,
-) -> AsyncIterator[RabbitBroker]:
-    prefix = f"test-retry-{uuid4()}-"
-    exchange = copy(topology.PAYMENTS_EXCHANGE)
-    queue = copy(topology.PAYMENTS_NEW_QUEUE)
-    exchange.name = prefix + exchange.name
-    queue.name = prefix + queue.name
-    monkeypatch.setattr(topology, "PAYMENTS_EXCHANGE", exchange)
-    monkeypatch.setattr(topology, "PAYMENTS_NEW_QUEUE", queue)
-    broker = create_broker()
-    try:
-        await broker.connect()
-        await topology.declare_payment_topology(broker)
-        await topology.declare_retry_topology(broker)
-        yield broker
-    finally:
-        try:
-            for definition in (
-                topology.retry_queue(2),
-                topology.retry_queue(3),
-                topology.dead_letter_queue(),
-                queue,
-            ):
-                declared = await broker.declare_queue(definition)
-                await declared.delete(if_unused=False, if_empty=False)
-            for definition in (
-                topology.retry_exchange(),
-                topology.dead_letter_exchange(),
-                exchange,
-            ):
-                declared = await broker.declare_exchange(definition)
-                await declared.delete(if_unused=False)
-        finally:
-            await broker.stop()
 
 
 async def receive(
