@@ -1,17 +1,19 @@
 import asyncio
 from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import uuid4
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
+from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
+from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
 
 
@@ -229,3 +231,79 @@ async def test_webhook_failure_preserves_result_without_marking_delivery(
         assert saved.webhook_delivered_at is None
         assert saved.status == status
         assert saved.processed_at == completed_payment.processed_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
+async def test_concurrent_delivery_waits_and_skips_committed_webhook(
+    outbox_database: Database, completed_payment: Payment, status: PaymentStatus
+) -> None:
+    async with outbox_database.session_scope() as session:
+        payment = await session.get(Payment, completed_payment.id)
+        assert payment is not None
+        payment.status = status
+
+    webhook_entered = asyncio.Event()
+    release_webhook = asyncio.Event()
+    waiter_started = asyncio.Event()
+    waiter_pid: int | None = None
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        webhook_entered.set()
+        await release_webhook.wait()
+        return httpx.Response(204)
+
+    class WaitingRepository(PaymentRepository):
+        async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None:
+            nonlocal waiter_pid
+            waiter_pid = await self.session.scalar(select(func.pg_backend_pid()))
+            waiter_started.set()
+            return await super().find_by_id_for_update(payment_id)
+
+    first_service = PaymentService(outbox_database.session_scope)
+    second_service = PaymentService(outbox_database.session_scope, WaitingRepository)
+    transport_handle = AsyncMock(side_effect=handle)
+    async with WebhookClient(
+        timeout=1.0, transport=httpx.MockTransport(transport_handle)
+    ) as webhook:
+        tasks = [
+            asyncio.create_task(
+                first_service.deliver_webhook(completed_payment.id, webhook)
+            )
+        ]
+        try:
+            async with asyncio.timeout(10):
+                await webhook_entered.wait()
+                tasks.append(
+                    asyncio.create_task(
+                        second_service.deliver_webhook(completed_payment.id, webhook)
+                    )
+                )
+                await waiter_started.wait()
+                assert waiter_pid is not None
+                async with outbox_database.session_scope() as session:
+                    while not await session.scalar(
+                        select(func.pg_blocking_pids(waiter_pid))
+                    ):
+                        await asyncio.sleep(0.01)
+                    saved = await session.get(Payment, completed_payment.id)
+                    assert saved is not None
+                    assert saved.status == status
+                    assert saved.processed_at == completed_payment.processed_at
+                    assert saved.webhook_delivered_at is None
+                transport_handle.assert_awaited_once()
+                release_webhook.set()
+                await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    transport_handle.assert_awaited_once()
+    async with outbox_database.session_scope() as session:
+        saved = await session.get(Payment, completed_payment.id)
+        assert saved is not None
+        assert saved.status == status
+        assert saved.processed_at == completed_payment.processed_at
+        assert saved.created_at == completed_payment.created_at
+        assert saved.webhook_delivered_at is not None

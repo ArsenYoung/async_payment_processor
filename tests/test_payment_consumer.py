@@ -1,5 +1,7 @@
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from copy import copy
 from unittest.mock import AsyncMock, Mock, call
 from uuid import uuid4
@@ -10,7 +12,9 @@ import pytest_asyncio
 from faststream.rabbit import RabbitBroker
 from faststream.rabbit import TestRabbitBroker as RabbitTestBroker
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
@@ -270,6 +274,186 @@ async def test_webhook_failure_preserves_committed_payment_result(
         assert payment.status == status
         assert payment.processed_at is not None
         assert payment.webhook_delivered_at is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
+async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
+    outbox_database: Database, saved_event: PaymentCreatedEvent, status: PaymentStatus
+) -> None:
+    gateway = AsyncMock(spec=PaymentGatewaySimulator)
+    gateway.process.return_value = status
+    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    handle = AsyncMock(return_value=httpx.Response(204))
+    broker = create_broker()
+
+    async with WebhookClient(
+        timeout=1.0, transport=httpx.MockTransport(handle)
+    ) as webhook:
+        register_payment_subscriber(broker, service, webhook)
+        async with RabbitTestBroker(broker):
+            await _publish(broker, saved_event)
+            async with outbox_database.session_scope() as session:
+                first = await session.get(Payment, saved_event.payload.payment_id)
+                assert first is not None
+                assert first.status == status
+                assert first.processed_at is not None
+                assert first.webhook_delivered_at is not None
+
+            await _publish(broker, saved_event)
+
+    gateway.process.assert_awaited_once_with()
+    handle.assert_awaited_once()
+    async with outbox_database.session_scope() as session:
+        repeated = await session.get(Payment, saved_event.payload.payment_id)
+        assert repeated is not None
+        assert repeated.status == first.status
+        assert repeated.processed_at == first.processed_at
+        assert repeated.webhook_delivered_at == first.webhook_delivered_at
+        assert repeated.created_at == first.created_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
+@pytest.mark.parametrize("failure", ["http", "connection", "timeout"])
+async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
+    outbox_database: Database,
+    saved_event: PaymentCreatedEvent,
+    status: PaymentStatus,
+    failure: str,
+) -> None:
+    gateway = AsyncMock(spec=PaymentGatewaySimulator)
+    gateway.process.return_value = status
+    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    requests: list[httpx.Request] = []
+    error_type = {
+        "http": httpx.HTTPStatusError,
+        "connection": httpx.ConnectError,
+        "timeout": httpx.ReadTimeout,
+    }[failure]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            if failure == "http":
+                return httpx.Response(503)
+            raise error_type("Webhook unavailable", request=request)
+        return httpx.Response(204)
+
+    broker = create_broker()
+    async with WebhookClient(
+        timeout=1.0, transport=httpx.MockTransport(handle)
+    ) as webhook:
+        register_payment_subscriber(broker, service, webhook)
+        async with RabbitTestBroker(broker):
+            with pytest.raises(error_type):
+                await _publish(broker, saved_event)
+
+            async with outbox_database.session_scope() as session:
+                failed_delivery = await session.get(
+                    Payment, saved_event.payload.payment_id
+                )
+                assert failed_delivery is not None
+                assert failed_delivery.status == status
+                assert failed_delivery.processed_at is not None
+                assert failed_delivery.webhook_delivered_at is None
+
+            await _publish(broker, saved_event)
+            async with outbox_database.session_scope() as session:
+                delivered = await session.get(Payment, saved_event.payload.payment_id)
+                assert delivered is not None
+                assert delivered.status == status
+                assert delivered.processed_at == failed_delivery.processed_at
+                assert delivered.created_at == failed_delivery.created_at
+                assert delivered.webhook_delivered_at is not None
+
+            await _publish(broker, saved_event)
+
+    gateway.process.assert_awaited_once_with()
+    assert len(requests) == 2
+    assert requests[0].url == requests[1].url
+    assert requests[0].content == requests[1].content
+    async with outbox_database.session_scope() as session:
+        repeated = await session.get(Payment, saved_event.payload.payment_id)
+        assert repeated is not None
+        assert repeated.status == status
+        assert repeated.processed_at == failed_delivery.processed_at
+        assert repeated.webhook_delivered_at == delivered.webhook_delivered_at
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
+async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
+    outbox_database: Database, saved_event: PaymentCreatedEvent, status: PaymentStatus
+) -> None:
+    gateway = AsyncMock(spec=PaymentGatewaySimulator)
+    gateway.process.return_value = status
+    error = OperationalError("COMMIT", {}, RuntimeError("Connection lost"))
+    fail_delivery_commit = True
+
+    def fail_commit(session: object) -> None:
+        raise error
+
+    @asynccontextmanager
+    async def session_scope() -> AsyncIterator[AsyncSession]:
+        nonlocal fail_delivery_commit
+        async with outbox_database.session_scope() as session:
+            yield session
+            payment = await session.get(Payment, saved_event.payload.payment_id)
+            if (
+                fail_delivery_commit
+                and payment is not None
+                and payment.webhook_delivered_at is not None
+            ):
+                fail_delivery_commit = False
+                event.listen(session.sync_session, "before_commit", fail_commit)
+
+    service = PaymentService(session_scope, gateway=gateway)
+    handle = AsyncMock(return_value=httpx.Response(204))
+    broker = create_broker()
+
+    async with WebhookClient(
+        timeout=1.0, transport=httpx.MockTransport(handle)
+    ) as webhook:
+        register_payment_subscriber(broker, service, webhook)
+        async with RabbitTestBroker(broker):
+            with pytest.raises(OperationalError) as caught:
+                await _publish(broker, saved_event)
+            assert caught.value is error
+            handle.assert_awaited_once()
+
+            async with outbox_database.session_scope() as session:
+                failed_delivery = await session.get(
+                    Payment, saved_event.payload.payment_id
+                )
+                assert failed_delivery is not None
+                assert failed_delivery.status == status
+                assert failed_delivery.processed_at is not None
+                assert failed_delivery.webhook_delivered_at is None
+
+            await _publish(broker, saved_event)
+            async with outbox_database.session_scope() as session:
+                delivered = await session.get(Payment, saved_event.payload.payment_id)
+                assert delivered is not None
+                assert delivered.status == status
+                assert delivered.processed_at == failed_delivery.processed_at
+                assert delivered.created_at == failed_delivery.created_at
+                assert delivered.webhook_delivered_at is not None
+
+            await _publish(broker, saved_event)
+
+    gateway.process.assert_awaited_once_with()
+    assert handle.await_count == 2
+    first_request = handle.await_args_list[0].args[0]
+    repeated_request = handle.await_args_list[1].args[0]
+    assert repeated_request.url == first_request.url
+    assert repeated_request.content == first_request.content
+    async with outbox_database.session_scope() as session:
+        repeated = await session.get(Payment, saved_event.payload.payment_id)
+        assert repeated is not None
+        assert repeated.status == status
+        assert repeated.processed_at == failed_delivery.processed_at
+        assert repeated.webhook_delivered_at == delivered.webhook_delivered_at
 
 
 @pytest.mark.asyncio
