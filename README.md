@@ -6,25 +6,39 @@
 
 Готовы:
 
-- базовая структура API и consumer;
+- отдельные процессы API, публикатора Outbox и consumer;
 - конфигурация через переменные окружения;
 - Dockerfile и Docker Compose;
 - подключение к PostgreSQL и RabbitMQ;
 - модели `Payment` и `Outbox`;
 - Alembic-миграция для таблиц `payments` и `outbox`;
-- endpoint `GET /health`.
+- endpoint `GET /health`;
+- публикатор Outbox с подтверждением RabbitMQ и корректной остановкой.
 
-В следующих блоках будут добавлены платежные API, Outbox publisher, обработка webhook, retry и DLQ.
+В следующих блоках будут добавлены обработчик платежей в consumer, отправка webhook, retry и DLQ.
+
+## Фоновые процессы
+
+| Сервис Compose | Роль | Точка запуска |
+| --- | --- | --- |
+| `outbox-to-rabbitmq-worker` | Выбирает события из PostgreSQL Outbox, публикует в RabbitMQ и сохраняет результат отправки | `payment_processor.outbox_to_rabbitmq_worker.main` |
+| `rabbitmq-to-payment-worker` | Отдельный процесс для обработки сообщений `payments.new` | `payment_processor.rabbitmq_to_payment_worker.main` |
+
+Воркеры используют один Docker-образ и запускаются отдельными командами. У каждого свои подключения и обработка сигналов остановки. Публикатор не зависит от запуска consumer. Сейчас consumer подключается к RabbitMQ и запускает инфраструктуру подписчиков; обработчик платежей будет добавлен следующим блоком.
+
+Настройки публикатора: `OUTBOX_BATCH_SIZE` — размер партии, `OUTBOX_POLL_INTERVAL` — пауза между партиями в секундах, `OUTBOX_PUBLISH_TIMEOUT` — таймаут публикации одного события в секундах. Значения по умолчанию: `100`, `1.0` и `5.0`; все значения должны быть положительными, интервалы и таймауты — конечными.
 
 ## Структура проекта
 
 ```text
 src/payment_processor/
-├── api/          # HTTP API
-├── consumer/     # обработчик сообщений
-├── core/         # конфигурация приложения
-├── db/           # подключение и модели PostgreSQL
-└── messaging/    # подключение к RabbitMQ
+├── api/                         # HTTP API
+├── core/                        # конфигурация приложения
+├── db/                          # подключение и модели PostgreSQL
+├── messaging/                   # подключение к RabbitMQ
+├── outbox_to_rabbitmq_worker/    # публикатор PostgreSQL Outbox → RabbitMQ
+├── rabbitmq_to_payment_worker/  # обработчик сообщений
+└── services/                    # операции с платежами и публикация Outbox
 
 alembic/
 └── versions/     # миграции базы данных
@@ -63,7 +77,8 @@ docker compose ps
 - PostgreSQL — `healthy`;
 - RabbitMQ — `healthy`;
 - API — `healthy`;
-- consumer — запущен.
+- `outbox-to-rabbitmq-worker` — запущен;
+- `rabbitmq-to-payment-worker` — запущен.
 
 Остановить сервисы:
 
@@ -115,10 +130,16 @@ poetry run uvicorn payment_processor.api.main:app --reload
 
 Для локального запуска без Docker PostgreSQL и RabbitMQ должны быть доступны по адресам из `.env`.
 
-Запуск consumer:
+Запустите публикатор Outbox в отдельном терминале:
 
 ```bash
-poetry run python -m payment_processor.consumer.main
+poetry run python -m payment_processor.outbox_to_rabbitmq_worker.main
+```
+
+Запустите consumer в другом терминале:
+
+```bash
+poetry run python -m payment_processor.rabbitmq_to_payment_worker.main
 ```
 
 ## Миграции базы данных
@@ -173,7 +194,7 @@ poetry run mypy
 poetry run pytest
 ```
 
-Тесты будут добавлены на следующих этапах разработки.
+Тесты включают проверки API, Outbox, RabbitMQ и жизненного цикла отдельных воркеров.
 
 ## Полезные команды
 
@@ -187,5 +208,6 @@ poetry check --lock
 
 ```bash
 docker compose logs -f api
-docker compose logs -f consumer
+docker compose logs -f outbox-to-rabbitmq-worker
+docker compose logs -f rabbitmq-to-payment-worker
 ```

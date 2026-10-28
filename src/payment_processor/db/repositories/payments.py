@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
+from payment_processor.messaging.schemas import PaymentCreatedPayload
 
 
 class PaymentRepository:
@@ -28,14 +29,16 @@ class PaymentRepository:
             Outbox(
                 payment_id=payment.id,
                 event_type=OutboxEventType.PAYMENT_CREATED,
-                payload={
-                    "payment_id": str(payment.id),
-                    "amount": str(payment.amount),
-                    "currency": payment.currency.value,
-                    "description": payment.description,
-                    "metadata": payment.payment_metadata,
-                    "webhook_url": payment.webhook_url,
-                },
+                payload=PaymentCreatedPayload.model_validate(
+                    {
+                        "payment_id": payment.id,
+                        "amount": payment.amount,
+                        "currency": payment.currency,
+                        "description": payment.description,
+                        "metadata": payment.payment_metadata,
+                        "webhook_url": payment.webhook_url,
+                    }
+                ).model_dump(mode="json"),
             )
         )
         return payment

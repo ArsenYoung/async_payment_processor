@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from uuid import uuid4
 
 import pytest
@@ -7,11 +7,13 @@ from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.main import create_app
 from payment_processor.core.config import settings
 from payment_processor.db.models import Outbox, Payment
+from payment_processor.db.models.base import Base
 from payment_processor.db.session import Database
 from payment_processor.services.payments import PaymentService
 
@@ -21,6 +23,29 @@ async def database() -> AsyncGenerator[Database, None]:
     database = Database(settings.database_url)
     try:
         yield database
+    finally:
+        await database.dispose()
+
+
+@pytest_asyncio.fixture
+async def outbox_database() -> AsyncIterator[Database]:
+    schema = f"test_outbox_{uuid4().hex}"
+    database = Database(settings.database_url)
+    database.engine = database.engine.execution_options(
+        schema_translate_map={None: schema}
+    )
+    database.session_factory.configure(bind=database.engine)
+
+    try:
+        async with database.engine.begin() as connection:
+            await connection.execute(CreateSchema(schema))
+        try:
+            async with database.engine.begin() as connection:
+                await connection.run_sync(Base.metadata.create_all)
+            yield database
+        finally:
+            async with database.engine.begin() as connection:
+                await connection.execute(DropSchema(schema, cascade=True))
     finally:
         await database.dispose()
 
