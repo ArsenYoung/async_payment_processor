@@ -1,0 +1,130 @@
+x-application: &application
+  image: ${COMPOSE_PROJECT_NAME}-app:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: &environment
+    DATABASE_URL: postgresql+asyncpg://e2e:e2e@postgres:5432/payments_e2e
+    RABBITMQ_URL: amqp://e2e:e2e@rabbitmq:5672/
+    API_KEY: e2e-api-key
+    LOG_LEVEL: INFO
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: payments_e2e
+      POSTGRES_USER: e2e
+      POSTGRES_PASSWORD: e2e
+    ports:
+      - "127.0.0.1::5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "e2e", "-d", "payments_e2e"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: e2e
+      RABBITMQ_DEFAULT_PASS: e2e
+    ports:
+      - "127.0.0.1::5672"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_listener 5672
+      interval: 2s
+      timeout: 10s
+      retries: 60
+
+  migrate:
+    <<: *application
+    command: ["alembic", "upgrade", "head"]
+    volumes:
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *application
+    command: ["uvicorn", "payment_processor.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1::8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          request = urllib.request.Request('http://localhost:8000/health', headers={'X-API-Key': 'e2e-api-key'});
+          urllib.request.urlopen(request, timeout=3).close()
+      interval: 1s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  outbox-to-rabbitmq-worker:
+    <<: *application
+    command: ["python", "-m", "payment_processor.outbox_to_rabbitmq_worker.main"]
+    environment:
+      <<: *environment
+      OUTBOX_POLL_INTERVAL: "0.1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  rabbitmq-to-payment-worker:
+    <<: *application
+    command: ["python", "/app/e2e/consumer.py"]
+    environment:
+      <<: *environment
+      E2E_PAYMENT_STATUS: ${E2E_PAYMENT_STATUS:-succeeded}
+    volumes:
+      - ./tests/e2e:/app/e2e:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      webhook-receiver:
+        condition: service_healthy
+
+  rabbitmq-to-payment-worker-smoke:
+    <<: *application
+    profiles: [smoke]
+    command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  webhook-receiver:
+    <<: *application
+    command: ["uvicorn", "webhook_receiver:app", "--app-dir", "/app/e2e", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - ./tests/e2e:/app/e2e:ro
+    ports:
+      - "127.0.0.1::8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://localhost:8000/health', timeout=3).close()
+      interval: 1s
+      timeout: 5s
+      retries: 60
