@@ -7,3 +7,4 @@ poetry.toml
 __pycache__/
 *.py[cod]
 .env
+improvements.md
