@@ -100,6 +100,16 @@ services:
       webhook-receiver:
         condition: service_healthy
 
+  rabbitmq-to-payment-worker-smoke:
+    <<: *application
+    profiles: [smoke]
+    command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
   webhook-receiver:
     <<: *application
     command: ["uvicorn", "webhook_receiver:app", "--app-dir", "/app/e2e", "--host", "0.0.0.0", "--port", "8000"]
