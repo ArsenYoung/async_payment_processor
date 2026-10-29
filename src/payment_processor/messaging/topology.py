@@ -1,4 +1,6 @@
 import asyncio
+import logging
+from time import perf_counter
 
 from faststream.rabbit import (
     ExchangeType,
@@ -10,6 +12,7 @@ from faststream.rabbit import (
 from faststream.rabbit.message import RabbitMessage
 from pamqp.commands import Basic
 
+from payment_processor.core.logging import processing_fields
 from payment_processor.db.models import OutboxEventType
 from payment_processor.messaging.retry import (
     ATTEMPT_HEADER,
@@ -18,6 +21,7 @@ from payment_processor.messaging.retry import (
 )
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 
+logger = logging.getLogger(__name__)
 PAYMENTS_EXCHANGE = RabbitExchange(
     "payments",
     type=ExchangeType.DIRECT,
@@ -91,6 +95,7 @@ async def publish_failed_payment(
     retry: RetryAttempt | None,
     timeout: float = 5.0,
 ) -> None:
+    started = perf_counter()
     exchange = retry_exchange() if retry is not None else dead_letter_exchange()
     queue = retry_queue(retry.number) if retry is not None else dead_letter_queue()
     headers = failure_headers(
@@ -101,23 +106,55 @@ async def publish_failed_payment(
     )
     if retry is not None:
         headers[ATTEMPT_HEADER] = retry.number
-    async with asyncio.timeout(timeout):
-        confirmation = await broker.publish(
-            message.body,
-            exchange=exchange,
-            routing_key=queue.routing(),
-            headers=headers,
-            mandatory=True,
-            persist=True,
-            timeout=timeout,
-            expiration=max(0.001, retry.delay) if retry is not None else None,
-            message_id=message.message_id,
-            message_type=message.raw_message.type,
-            correlation_id=message.correlation_id,
-            content_type=message.content_type,
+    fields = processing_fields(
+        operation="retry_publish" if retry else "dlq_publish",
+        queue=queue.name,
+        attempt=attempt,
+        reason=reason,
+        error_type=type(error).__name__,
+    )
+    if retry is not None:
+        fields.update(next_attempt=retry.number, retry_delay_ms=retry.delay * 1000)
+    try:
+        async with asyncio.timeout(timeout):
+            confirmation = await broker.publish(
+                message.body,
+                exchange=exchange,
+                routing_key=queue.routing(),
+                headers=headers,
+                mandatory=True,
+                persist=True,
+                timeout=timeout,
+                expiration=max(0.001, retry.delay) if retry is not None else None,
+                message_id=message.message_id,
+                message_type=message.raw_message.type,
+                correlation_id=message.correlation_id,
+                content_type=message.content_type,
+            )
+        if not isinstance(confirmation, Basic.Ack):
+            raise RuntimeError(
+                "RabbitMQ did not acknowledge failed payment publication"
+            )
+    except Exception as publication_error:
+        logger.exception(
+            "Failed payment transfer failed",
+            extra={
+                **fields,
+                "outcome": "failed",
+                "error_type": type(publication_error).__name__,
+                "duration_ms": (perf_counter() - started) * 1000,
+            },
         )
-    if not isinstance(confirmation, Basic.Ack):
-        raise RuntimeError("RabbitMQ did not acknowledge failed payment publication")
+        raise
+    logger.log(
+        logging.WARNING if retry else logging.ERROR,
+        "Payment retry scheduled" if retry else "Payment event sent to DLQ",
+        extra={
+            **fields,
+            "outcome": "published",
+            "duration_ms": (perf_counter() - started) * 1000,
+        },
+    )
 
 
 async def publish_payment_event(

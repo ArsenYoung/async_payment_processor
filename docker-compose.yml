@@ -36,6 +36,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
     healthcheck:
@@ -66,6 +67,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
       OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1.0}
       OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
@@ -85,6 +87,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5.0}
       RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1.0}
     depends_on:

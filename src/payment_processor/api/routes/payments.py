@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import AfterValidator
 
 from payment_processor.api.dependencies import get_payment_service
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 )
 async def create_payment(
     request: PaymentCreateRequest,
+    http_request: Request,
     idempotency_key: Annotated[
         str,
         Header(alias="Idempotency-Key", min_length=1, max_length=255),
@@ -41,6 +42,7 @@ async def create_payment(
             detail="Idempotency key was used with a different request",
         ) from error
 
+    http_request.state.payment_id = payment.id
     return PaymentCreateResponse(
         payment_id=payment.id,
         status=payment.status,
@@ -55,8 +57,10 @@ async def create_payment(
 )
 async def get_payment(
     payment_id: UUID,
+    request: Request,
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentDetailsResponse:
+    request.state.payment_id = payment_id
     payment = await payment_service.get_payment(payment_id)
     if payment is None:
         raise HTTPException(

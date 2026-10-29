@@ -1,13 +1,21 @@
+import logging
+from contextlib import ExitStack
+from time import perf_counter
+from uuid import UUID
+
 from faststream.middlewares import AckPolicy
 from faststream.rabbit import RabbitBroker, RabbitMessage
 from faststream.rabbit.message import RabbitMessage as IncomingPaymentMessage
 
+from payment_processor.core.logging import processing_context, processing_fields
 from payment_processor.messaging import topology
 from payment_processor.messaging.retry import RetryPolicy, read_attempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.services.errors import is_retryable_processing_error
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
+
+logger = logging.getLogger(__name__)
 
 
 def register_payment_subscriber(
@@ -29,24 +37,69 @@ def register_payment_subscriber(
     async def handle_payment(body: bytes, message: RabbitMessage) -> None:
         attempt = 1
         reason = "invalid_message"
-        try:
-            attempt = read_attempt(message.headers)
-            event = PaymentCreatedEvent.model_validate_json(body)
-            reason = "non_retryable_processing_error"
-            await payment_service.process_payment(event.payload.payment_id)
-            await payment_service.deliver_webhook(
-                event.payload.payment_id, webhook_client
+        started = perf_counter()
+        with ExitStack() as context:
+            context.enter_context(
+                processing_context(queue=topology.PAYMENTS_NEW_QUEUE.name)
             )
-        except Exception as error:
-            retry = None
-            if reason != "invalid_message" and is_retryable_processing_error(error):
-                retry = retry_policy.next_retry(attempt)
-                reason = "retryable_processing_error" if retry else "attempts_exhausted"
-            await topology.publish_failed_payment(
-                broker,
-                message,
-                attempt=attempt,
-                error=error,
-                reason=reason,
-                retry=retry,
-            )
+            try:
+                message_event_id = str(UUID(message.message_id))
+            except (ValueError, TypeError, AttributeError):
+                pass
+            else:
+                context.enter_context(processing_context(event_id=message_event_id))
+            try:
+                attempt = read_attempt(message.headers)
+                context.enter_context(processing_context(attempt=attempt))
+                event = PaymentCreatedEvent.model_validate_json(body)
+                context.enter_context(
+                    processing_context(
+                        payment_id=str(event.payload.payment_id),
+                        event_id=str(event.event_id),
+                    )
+                )
+                logger.info(
+                    "Payment event received",
+                    extra=processing_fields(operation="consume", outcome="received"),
+                )
+                reason = "non_retryable_processing_error"
+                await payment_service.process_payment(event.payload.payment_id)
+                await payment_service.deliver_webhook(
+                    event.payload.payment_id, webhook_client
+                )
+            except Exception as error:
+                retry = None
+                if reason != "invalid_message" and is_retryable_processing_error(error):
+                    retry = retry_policy.next_retry(attempt)
+                    reason = (
+                        "retryable_processing_error" if retry else "attempts_exhausted"
+                    )
+                logger.log(
+                    logging.WARNING if retry else logging.ERROR,
+                    "Payment event handling failed",
+                    extra=processing_fields(
+                        operation="consume",
+                        outcome="failed",
+                        reason=reason,
+                        error_type=type(error).__name__,
+                        duration_ms=(perf_counter() - started) * 1000,
+                    ),
+                    exc_info=True,
+                )
+                await topology.publish_failed_payment(
+                    broker,
+                    message,
+                    attempt=attempt,
+                    error=error,
+                    reason=reason,
+                    retry=retry,
+                )
+            else:
+                logger.info(
+                    "Payment event handling completed",
+                    extra=processing_fields(
+                        operation="consume",
+                        outcome="completed",
+                        duration_ms=(perf_counter() - started) * 1000,
+                    ),
+                )
