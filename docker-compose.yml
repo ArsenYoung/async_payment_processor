@@ -5,6 +5,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-payments}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -15,9 +17,12 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    hostname: rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD must be set in .env}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -91,3 +96,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
