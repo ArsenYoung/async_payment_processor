@@ -220,7 +220,7 @@ async def test_webhook_failure_preserves_result_without_marking_delivery(
     async with WebhookClient(
         timeout=5.0, transport=httpx.MockTransport(handle)
     ) as client:
-        with pytest.raises(httpx.HTTPError):
+        with pytest.raises((httpx.HTTPError, WebhookRequestTimeoutError)):
             async with outbox_database.session_scope() as session:
                 repository = PaymentRepository(session)
                 payment = await repository.find_by_id_for_update(completed_payment.id)

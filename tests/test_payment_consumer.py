@@ -17,6 +17,10 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import (
+    DeliverWebhookCommand,
+    ProcessPaymentCommand,
+)
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
@@ -92,8 +96,10 @@ async def test_subscriber_processes_before_delivering_webhook(
         await _publish(broker, payment_event)
 
     assert service.mock_calls == [
-        call.process_payment(payment_event.payload.payment_id),
-        call.deliver_webhook(payment_event.payload.payment_id, webhook),
+        call.process_payment(ProcessPaymentCommand(payment_event.payload.payment_id)),
+        call.deliver_webhook(
+            DeliverWebhookCommand(payment_event.payload.payment_id), webhook
+        ),
     ]
 
 
