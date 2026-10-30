@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from decimal import Decimal
 from time import perf_counter
 from uuid import UUID
 
@@ -20,6 +21,25 @@ from payment_processor.services.payment_gateway_simulator import PaymentGatewayS
 from payment_processor.services.webhooks import WebhookClient
 
 logger = logging.getLogger(__name__)
+
+
+def _json_values_equal(left: object, right: object) -> bool:
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _json_values_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_values_equal(left_value, right_value)
+            for left_value, right_value in zip(left, right, strict=True)
+        )
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, (int, float, Decimal)) and isinstance(
+        right, (int, float, Decimal)
+    ):
+        return Decimal(str(left)) == Decimal(str(right))
+    return type(left) is type(right) and left == right
 
 
 class IdempotencyConflictError(Exception):
@@ -177,6 +197,6 @@ class PaymentService:
             payment.amount == request.amount
             and payment.currency == request.currency
             and payment.description == request.description
-            and payment.payment_metadata == request.metadata
+            and _json_values_equal(payment.payment_metadata, request.metadata)
             and payment.webhook_url == str(request.webhook_url)
         )

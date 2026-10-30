@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import dataclass, field
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
@@ -60,6 +61,72 @@ async def test_reused_key_with_different_payload_returns_conflict(
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("original_metadata", "repeated_metadata"),
+    [
+        ({"flag": True}, {"flag": 1}),
+        ({"nested": {"enabled": False}}, {"nested": {"enabled": 0}}),
+    ],
+)
+async def test_reused_key_with_boolean_number_metadata_collision_returns_conflict(
+    client: AsyncClient,
+    payment_payload: dict,
+    payment_headers: dict[str, str],
+    original_metadata: dict,
+    repeated_metadata: dict,
+) -> None:
+    original_payload = deepcopy(payment_payload)
+    original_payload["metadata"] = original_metadata
+    repeated_payload = deepcopy(original_payload)
+    repeated_payload["metadata"] = repeated_metadata
+
+    first = await client.post(
+        "/api/v1/payments", headers=payment_headers, json=original_payload
+    )
+    response = await client.post(
+        "/api/v1/payments", headers=payment_headers, json=repeated_payload
+    )
+
+    assert first.status_code == 202
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_reused_key_metadata_json_order_rules(
+    client: AsyncClient,
+    payment_payload: dict,
+    payment_headers: dict[str, str],
+) -> None:
+    original_payload = deepcopy(payment_payload)
+    original_payload["metadata"] = {
+        "outer": {"first": 1, "second": 2},
+        "items": ["first", "second"],
+    }
+    reordered_keys_payload = deepcopy(original_payload)
+    reordered_keys_payload["metadata"] = {
+        "items": ["first", "second"],
+        "outer": {"second": 2, "first": 1.0},
+    }
+    reordered_array_payload = deepcopy(original_payload)
+    reordered_array_payload["metadata"]["items"] = ["second", "first"]
+
+    first = await client.post(
+        "/api/v1/payments", headers=payment_headers, json=original_payload
+    )
+    same_metadata = await client.post(
+        "/api/v1/payments", headers=payment_headers, json=reordered_keys_payload
+    )
+    conflicting_metadata = await client.post(
+        "/api/v1/payments", headers=payment_headers, json=reordered_array_payload
+    )
+
+    assert first.status_code == 202
+    assert same_metadata.status_code == 202
+    assert same_metadata.json() == first.json()
+    assert conflicting_metadata.status_code == 409
 
 
 @pytest.mark.asyncio
