@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,5 +49,17 @@ class OutboxRepository:
         event.attempts += 1
         event.last_error = error
         event.quarantined_at = datetime.now(UTC)
+        event.next_attempt_at = None
+        await self.session.flush()
+
+    async def get_for_recovery(self, event_id: UUID) -> Outbox | None:
+        return await self.session.scalar(
+            select(Outbox).where(Outbox.id == event_id).with_for_update()
+        )
+
+    async def restore_quarantined(self, event: Outbox) -> None:
+        if event.published_at is not None or event.quarantined_at is None:
+            raise ValueError("Only unpublished quarantined events can be recovered")
+        event.quarantined_at = None
         event.next_attempt_at = None
         await self.session.flush()
