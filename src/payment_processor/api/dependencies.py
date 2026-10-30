@@ -19,7 +19,10 @@ api_key_header = APIKeyHeader(
 
 def get_payment_service(request: Request) -> PaymentService:
     database: Database = request.app.state.database
-    return PaymentService(session_scope_factory=database.session_scope)
+    return PaymentService(
+        session_scope_factory=database.session_scope,
+        gateway=request.app.state.payment_gateway,
+    )
 
 
 async def require_api_key(

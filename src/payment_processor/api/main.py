@@ -15,6 +15,7 @@ from payment_processor.api.routes.payments import router as payments_router
 from payment_processor.core.config import settings
 from payment_processor.core.logging import configure_logging
 from payment_processor.db.session import Database
+from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.state.database = (
         database if database is not None else Database(settings.database_url)
     )
+    application.state.payment_gateway = PaymentGatewaySimulator()
     application.add_exception_handler(
         RequestValidationError, request_validation_error_handler
     )
