@@ -1,5 +1,7 @@
 # Payment Processing Service
 
+[![CI](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml)
+
 Асинхронный сервис обработки платежей на FastAPI, PostgreSQL и RabbitMQ.
 
 ## Текущий статус
