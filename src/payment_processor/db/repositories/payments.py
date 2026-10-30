@@ -6,12 +6,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.db.models import Outbox, OutboxEventType, Payment, PaymentStatus
-from payment_processor.messaging.schemas import PaymentCreatedPayload
 
 
 class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self._outbox_payload: dict[str, object] | None = None
+
+    def set_outbox_payload(self, payload: dict[str, object]) -> None:
+        self._outbox_payload = payload
 
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
         return await self.session.get(Payment, payment_id)
@@ -36,6 +39,8 @@ class PaymentRepository:
             await self.session.flush()
 
     async def save_with_outbox(self, payment: Payment) -> Payment:
+        if self._outbox_payload is None:
+            raise ValueError("Outbox payload is required")
         self.session.add(payment)
         await self.session.flush()
         await self.session.refresh(payment)
@@ -43,16 +48,7 @@ class PaymentRepository:
             Outbox(
                 payment_id=payment.id,
                 event_type=OutboxEventType.PAYMENT_CREATED,
-                payload=PaymentCreatedPayload.model_validate(
-                    {
-                        "payment_id": payment.id,
-                        "amount": payment.amount,
-                        "currency": payment.currency,
-                        "description": payment.description,
-                        "metadata": payment.payment_metadata,
-                        "webhook_url": payment.webhook_url,
-                    }
-                ).model_dump(mode="json"),
+                payload=self._outbox_payload,
             )
         )
         return payment
