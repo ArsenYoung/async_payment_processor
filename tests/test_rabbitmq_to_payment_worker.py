@@ -116,6 +116,9 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
     runtime.webhook_factory.assert_called_once_with(
         timeout=consumer_main.settings.webhook_timeout
     )
+    consumer_main.create_broker.assert_called_once_with(
+        prefetch_count=consumer_main.settings.consumer_prefetch_count
+    )
     runtime.service_factory.assert_called_once_with(runtime.database.session_scope)
 
 

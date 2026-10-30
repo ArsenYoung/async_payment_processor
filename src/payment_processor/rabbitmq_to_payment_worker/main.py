@@ -28,7 +28,7 @@ async def _consume() -> None:
         await database.check_connection()
         async with WebhookClient(timeout=settings.webhook_timeout) as webhook_client:
             payment_service = PaymentService(database.session_scope)
-            broker = create_broker()
+            broker = create_broker(prefetch_count=settings.consumer_prefetch_count)
             try:
                 register_payment_subscriber(
                     broker,

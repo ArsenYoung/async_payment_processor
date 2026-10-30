@@ -72,6 +72,20 @@ def test_payment_topology_defines_durable_direct_route() -> None:
     assert topology.PAYMENTS_NEW_QUEUE.exclusive is False
 
 
+def test_consumer_broker_uses_prefetch_without_disabling_publisher_confirms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = Mock()
+    constructor = Mock(return_value=broker)
+    monkeypatch.setattr("payment_processor.messaging.broker.RabbitBroker", constructor)
+
+    create_broker(prefetch_count=5)
+
+    channel = constructor.call_args.kwargs["default_channel"]
+    assert channel.prefetch_count == 5
+    assert channel.publisher_confirms is True
+
+
 @pytest.mark.asyncio
 async def test_payment_event_reaches_queue_with_persistent_delivery_and_stable_id(
     isolated_broker: RabbitBroker, payment_event: PaymentCreatedEvent

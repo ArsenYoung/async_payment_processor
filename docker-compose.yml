@@ -95,6 +95,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5.0}
       RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1.0}
+      CONSUMER_PREFETCH_COUNT: ${CONSUMER_PREFETCH_COUNT:-5}
     depends_on:
       postgres:
         condition: service_healthy

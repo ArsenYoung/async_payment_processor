@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     outbox_publish_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     webhook_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     retry_base_delay: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    consumer_prefetch_count: int = Field(default=5, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
