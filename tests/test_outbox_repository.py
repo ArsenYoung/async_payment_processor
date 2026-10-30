@@ -67,6 +67,60 @@ async def test_non_positive_batch_limit_is_rejected(
 
 
 @pytest.mark.asyncio
+async def test_fetch_skips_quarantine_and_future_retries(
+    outbox_database: Database,
+) -> None:
+    events = await _save_events(outbox_database, 4)
+    now = datetime.now(UTC)
+    async with outbox_database.session_scope() as session:
+        session.add_all(events)
+        await OutboxRepository(session).quarantine(events[0], "Invalid payload")
+        await OutboxRepository(session).record_failure(
+            events[1], "Broker unavailable", next_attempt_at=now + timedelta(hours=1)
+        )
+        events[2].next_attempt_at = now - timedelta(seconds=1)
+
+    async with outbox_database.session_scope() as session:
+        batch = await OutboxRepository(session).fetch_unpublished(10)
+        assert [event.id for event in batch] == [event.id for event in events[2:]]
+        quarantined = await session.get(Outbox, events[0].id)
+        assert quarantined is not None
+        assert quarantined.quarantined_at is not None
+        assert quarantined.last_error == "Invalid payload"
+        assert quarantined.attempts == 1
+        assert quarantined.published_at is None
+        assert quarantined.payload == events[0].payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["deferred", "quarantined"])
+async def test_rollback_restores_recovery_state(
+    outbox_database: Database, outcome: str
+) -> None:
+    [saved] = await _save_events(outbox_database, 1)
+    with pytest.raises(RuntimeError, match="Abort recovery"):
+        async with outbox_database.session_scope() as session:
+            repository = OutboxRepository(session)
+            [record] = await repository.fetch_unpublished(1)
+            if outcome == "deferred":
+                await repository.record_failure(
+                    record,
+                    "Unavailable",
+                    next_attempt_at=datetime.now(UTC) + timedelta(hours=1),
+                )
+            else:
+                await repository.quarantine(record, "Invalid payload")
+            raise RuntimeError("Abort recovery")
+    async with outbox_database.session_scope() as session:
+        [record] = await OutboxRepository(session).fetch_unpublished(1)
+        assert record.id == saved.id
+        assert record.attempts == 0
+        assert record.last_error is None
+        assert record.quarantined_at is None
+        assert record.next_attempt_at is None
+
+
+@pytest.mark.asyncio
 async def test_parallel_publishers_lock_disjoint_batches_until_commit(
     outbox_database: Database,
 ) -> None:

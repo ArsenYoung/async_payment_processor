@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
@@ -30,6 +31,12 @@ class Outbox(Base):
     __table_args__ = (
         CheckConstraint("attempts >= 0", name="attempts_non_negative"),
         Index("ix_outbox_unpublished_created", "published_at", "created_at"),
+        Index(
+            "ix_outbox_available_created",
+            "created_at",
+            "id",
+            postgresql_where=text("published_at IS NULL AND quarantined_at IS NULL"),
+        ),
         Index("ix_outbox_payment_id", "payment_id"),
     )
 
@@ -68,6 +75,12 @@ class Outbox(Base):
         server_default="0",
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    quarantined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
