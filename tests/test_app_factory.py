@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, Mock, call
+from unittest.mock import Mock, call
 
 import pytest
 import pytest_asyncio
@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from payment_processor.api import main as api_main
 from payment_processor.api.main import create_app
 from payment_processor.core.config import settings
 from payment_processor.db.session import Database
@@ -86,48 +85,34 @@ async def test_payment_route_uses_database_of_its_application(
 
 @pytest.mark.asyncio
 async def test_lifespan_checks_supplied_database_and_releases_resources(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = Mock(spec=Database)
-    broker = Mock(connect=AsyncMock(), stop=AsyncMock())
     resources = Mock()
     resources.attach_mock(database, "database")
-    resources.attach_mock(broker, "broker")
-    monkeypatch.setattr(api_main, "create_broker", lambda: broker)
     application = create_app(database=database)
     assert application.state.database is database
 
     async with LifespanManager(application):
-        assert application.state.broker is broker
         resources.running()
 
     assert resources.mock_calls == [
         call.database.check_connection(),
-        call.broker.connect(),
         call.running(),
-        call.broker.stop(),
         call.database.dispose(),
     ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "failure", ["database", "broker-connect", "body", "broker-stop"]
-)
+@pytest.mark.parametrize("failure", ["database", "body", "database-dispose"])
 async def test_lifespan_releases_database_when_startup_or_shutdown_fails(
-    monkeypatch: pytest.MonkeyPatch,
     failure: str,
 ) -> None:
     error = RuntimeError(f"Failure during {failure}")
     database = Mock(spec=Database)
-    broker = Mock(connect=AsyncMock(), stop=AsyncMock())
     if failure == "database":
         database.check_connection.side_effect = error
-    elif failure == "broker-connect":
-        broker.connect.side_effect = error
-    elif failure == "broker-stop":
-        broker.stop.side_effect = error
-    monkeypatch.setattr(api_main, "create_broker", lambda: broker)
+    elif failure == "database-dispose":
+        database.dispose.side_effect = error
     application = create_app(database=database)
 
     with pytest.raises(RuntimeError) as caught:
@@ -137,11 +122,6 @@ async def test_lifespan_releases_database_when_startup_or_shutdown_fails(
 
     assert caught.value is error
     database.dispose.assert_awaited_once_with()
-    if failure == "database":
-        broker.connect.assert_not_awaited()
-        broker.stop.assert_not_awaited()
-    else:
-        broker.stop.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

@@ -126,6 +126,9 @@ def test_clean_startup_and_migrations(smoke_stack: SmokeStack) -> None:
         "payment_processor.rabbitmq_to_payment_worker.main",
     ]
     assert not consumer.get("volumes")
+    assert config["services"]["api"]["depends_on"] == {
+        "migrate": {"condition": "service_completed_successfully"}
+    }
 
     stack.compose("build", "migrate", timeout=600)
     stack.compose(

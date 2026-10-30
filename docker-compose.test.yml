@@ -69,8 +69,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      rabbitmq:
-        condition: service_healthy
 
   outbox-to-rabbitmq-worker:
     <<: *application
