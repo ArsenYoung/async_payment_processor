@@ -13,33 +13,24 @@ from payment_processor.api.middleware import (
 )
 from payment_processor.api.routes.payments import router as payments_router
 from payment_processor.core.config import settings
-from payment_processor.core.logging import configure_library_logging, configure_logging
+from payment_processor.core.logging import configure_logging
 from payment_processor.db.session import Database
-from payment_processor.messaging.broker import create_broker
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Open infrastructure connections when the API starts."""
+    """Check the database and release its resources when the API stops."""
     database: Database = application.state.database
     try:
-        try:
-            await database.check_connection()
-            broker = create_broker()
-            try:
-                await broker.connect()
-                configure_library_logging()
-                application.state.broker = broker
-                yield
-            finally:
-                await broker.stop()
-        finally:
-            await database.dispose()
+        await database.check_connection()
+        yield
     except Exception:
         logger.exception("API lifespan failed")
         raise
+    finally:
+        await database.dispose()
 
 
 def create_app(database: Database | None = None) -> FastAPI:

@@ -407,7 +407,7 @@ async def test_uvicorn_startup_failure_does_not_print_starlette_raw_traceback(
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("logging_state")
 @pytest.mark.parametrize(
-    "component", ["api", "outbox-to-rabbitmq-worker", "rabbitmq-to-payment-worker"]
+    "component", ["outbox-to-rabbitmq-worker", "rabbitmq-to-payment-worker"]
 )
 async def test_process_configures_faststream_logger_created_during_connection(
     logging_settings: Settings,
@@ -437,14 +437,9 @@ async def test_process_configures_faststream_logger_created_during_connection(
         "rabbitmq-to-payment-worker": consumer_main,
     }[component]
     monkeypatch.setattr(module, "settings", logging_settings)
-    monkeypatch.setattr(module, "create_broker", lambda: broker)
+    monkeypatch.setattr(module, "create_broker", lambda **kwargs: broker)
     monkeypatch.setattr(module, "Database", Mock(return_value=database))
-    if component == "api":
-        application = api_main.create_app(database=database)
-        with pytest.raises(RuntimeError) as caught:
-            async with LifespanManager(application):
-                log_and_stop()
-    elif component == "outbox-to-rabbitmq-worker":
+    if component == "outbox-to-rabbitmq-worker":
         monkeypatch.setattr(publisher_main, "declare_payment_topology", AsyncMock())
         monkeypatch.setattr(
             publisher_main,

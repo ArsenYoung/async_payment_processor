@@ -282,10 +282,10 @@ cp .env.example .env
 poetry install
 ```
 
-Запустите PostgreSQL и RabbitMQ и дождитесь их готовности:
+Запустите PostgreSQL и дождитесь его готовности. API не требует доступности RabbitMQ:
 
 ```bash
-docker compose up -d --wait postgres rabbitmq
+docker compose up -d --wait postgres
 ```
 
 Примените миграции к БД из `DATABASE_URL` в `.env`. В шаблоне указан PostgreSQL на `localhost:5432`; при изменении имени БД или учётных данных обновите также `DATABASE_URL`.
@@ -294,13 +294,18 @@ docker compose up -d --wait postgres rabbitmq
 poetry run alembic upgrade head
 ```
 
-После миграций соберите образы и запустите API и воркеры:
+После миграций соберите образ и запустите API отдельно:
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build api
 ```
 
-Миграции при запуске контейнеров автоматически не применяются.
+Миграции при запуске контейнеров автоматически не применяются. Воркеры можно запустить
+после восстановления RabbitMQ; они отправят накопленные события Outbox:
+
+```bash
+docker compose up -d --build outbox-to-rabbitmq-worker rabbitmq-to-payment-worker
+```
 
 Проверьте состояние контейнеров:
 

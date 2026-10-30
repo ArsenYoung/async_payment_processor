@@ -59,8 +59,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
 
   outbox-to-rabbitmq-worker:
     image: payment-processing-worker:local
