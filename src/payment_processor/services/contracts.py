@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from payment_processor.db.models import PaymentCurrency, PaymentStatus
@@ -14,6 +14,14 @@ class CreatePaymentCommand:
     description: str
     metadata: dict[str, Any]
     webhook_url: str
+
+
+class CreatePaymentInput(Protocol):
+    amount: Decimal
+    currency: PaymentCurrency
+    description: str
+    metadata: dict[str, Any]
+    webhook_url: Any
 
 
 @dataclass(frozen=True)

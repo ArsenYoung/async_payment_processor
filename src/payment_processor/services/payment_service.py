@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +9,7 @@ from payment_processor.db.models import Payment
 from payment_processor.db.repositories.payments import (
     PaymentRepository,
 )
-from payment_processor.services.contracts import CreatePaymentCommand
+from payment_processor.services.contracts import CreatePaymentCommand, CreatePaymentInput
 from payment_processor.services.payment_creation import (
     PaymentCreationService,
 )
@@ -47,7 +46,7 @@ class PaymentService:
         return await self._creation.get(payment_id)
 
     async def create_payment(
-        self, command: CreatePaymentCommand | Any, idempotency_key: str
+        self, command: CreatePaymentCommand | CreatePaymentInput, idempotency_key: str
     ) -> Payment:
         return await self._creation.create(
             self._normalize_command(command), idempotency_key
@@ -62,7 +61,9 @@ class PaymentService:
         await self._webhook_delivery.deliver(payment_id, webhook_client)
 
     @staticmethod
-    def _normalize_command(command: CreatePaymentCommand | Any) -> CreatePaymentCommand:
+    def _normalize_command(
+        command: CreatePaymentCommand | CreatePaymentInput,
+    ) -> CreatePaymentCommand:
         if isinstance(command, CreatePaymentCommand):
             return command
         return CreatePaymentCommand(

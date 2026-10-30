@@ -1,8 +1,7 @@
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +41,7 @@ class PaymentCreationService:
         except IntegrityError as error:
             return await self._recover(command, idempotency_key, error)
 
-    async def get(self, payment_id: Any) -> Payment | None:
+    async def get(self, payment_id: UUID) -> Payment | None:
         async with self._session_scope_factory() as session:
             return await self._repository_factory(session).find_by_id(payment_id)
 
