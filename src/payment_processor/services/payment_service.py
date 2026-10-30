@@ -5,8 +5,6 @@ from contextlib import AbstractAsyncContextManager
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from payment_processor.application.commands import (
     CreatePaymentCommand,
     DeliverWebhookCommand,
@@ -14,6 +12,7 @@ from payment_processor.application.commands import (
     ProcessPaymentCommand,
 )
 from payment_processor.db.models import Payment
+from payment_processor.db.repositories.factories import payment_repository_scope
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.payment_creation import CreatePaymentUseCase
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
@@ -28,21 +27,24 @@ class PaymentService:
 
     def __init__(
         self,
-        session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+        session_scope_factory: Callable[[], AbstractAsyncContextManager[Any]],
         repository_factory: Callable[
-            [AsyncSession], PaymentRepository
+            [Any], PaymentRepository
         ] = PaymentRepository,
         *,
         gateway: PaymentGateway | None = None,
     ) -> None:
         selected_gateway = gateway if gateway is not None else PaymentGatewaySimulator()
-        self._create = CreatePaymentUseCase(session_scope_factory, repository_factory)
-        self._get = GetPaymentUseCase(session_scope_factory, repository_factory)
+        store_scope_factory = payment_repository_scope(
+            session_scope_factory, repository_factory
+        )
+        self._create = CreatePaymentUseCase(store_scope_factory)
+        self._get = GetPaymentUseCase(store_scope_factory)
         self._process = ProcessPaymentUseCase(
-            session_scope_factory, selected_gateway, repository_factory
+            store_scope_factory, selected_gateway
         )
         self._deliver_webhook = DeliverPaymentWebhookUseCase(
-            session_scope_factory, repository_factory
+            store_scope_factory
         )
 
     async def create_payment(
