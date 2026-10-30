@@ -16,7 +16,7 @@ class PaymentNotFoundError(LookupError):
         super().__init__(f"Payment {payment_id} not found")
 
 
-class WebhookRequestTimeoutError(TimeoutError):
+class WebhookRequestTimeoutError(httpx.TimeoutException):
     """The complete webhook request exceeded its configured deadline."""
 
 

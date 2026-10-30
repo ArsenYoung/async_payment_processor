@@ -1,5 +1,7 @@
 # Payment Processing Service
 
+[![CI](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml)
+
 Асинхронный сервис обработки платежей на FastAPI, PostgreSQL и RabbitMQ.
 
 ## Текущий статус
@@ -199,6 +201,17 @@ curl -sS -H "X-API-Key: ${API_KEY}" \
 
 ## Retry и Dead Letter Queue
 
+### Контракт авторизации и количества попыток
+
+Операции API и `/health` требуют `X-API-Key`. Swagger UI, ReDoc и OpenAPI
+остаются публичными; ключ передаётся через кнопку **Authorize** в Swagger.
+
+Три попытки означают первую обработку и два управляемых повтора. Это ограничение
+цепочки retry, а не абсолютное число доставок: RabbitMQ redelivery, сбой после
+подтверждения публикации retry или повторная публикация Outbox могут привести к
+дополнительной доставке. Неповторяемые ошибки и некорректные сообщения попадают
+в DLQ сразу, без расходования всех трёх попыток.
+
 ### Очереди и маршрутизация
 
 | Exchange | Routing key | Очередь | Назначение |
@@ -277,36 +290,16 @@ cp .env.example .env
 
 Файл `.env` содержит локальные настройки и не добавляется в Git.
 
-Установите зависимости для запуска миграций с хоста:
+Соберите образ и запустите основной сценарий. Compose сам дождётся готовности PostgreSQL,
+применит миграции из образа и только после их успешного завершения запустит приложения:
 
 ```bash
-poetry install
+docker compose up -d --build --wait
 ```
 
-Запустите PostgreSQL и дождитесь его готовности. API не требует доступности RabbitMQ:
-
-```bash
-docker compose up -d --wait postgres
-```
-
-Примените миграции к БД из `DATABASE_URL` в `.env`. В шаблоне указан PostgreSQL на `localhost:5432`; при изменении имени БД или учётных данных обновите также `DATABASE_URL`.
-
-```bash
-poetry run alembic upgrade head
-```
-
-После миграций соберите образ и запустите API отдельно:
-
-```bash
-docker compose up -d --build api
-```
-
-Миграции при запуске контейнеров автоматически не применяются. Воркеры можно запустить
-после восстановления RabbitMQ; они отправят накопленные события Outbox:
-
-```bash
-docker compose up -d --build outbox-to-rabbitmq-worker rabbitmq-to-payment-worker
-```
+Повторный запуск этой команды безопасен: Alembic применяет только ещё не выполненные
+миграции. Если миграция завершается ошибкой, зависимые API и воркеры не считаются
+запущенными.
 
 Проверьте состояние контейнеров:
 
@@ -671,7 +664,7 @@ RUN_DOCKER_SMOKE=1 poetry run pytest -q tests/smoke/test_data_persistence.py
 poetry run pytest -q tests/test_payment_creation.py tests/test_payment_retrieval.py tests/test_payment_validation.py tests/test_payment_idempotency.py
 ```
 
-Docker-проверки по умолчанию пропускаются. Они требуют работающего Docker Engine, Compose и возможности собрать образ приложения. Каждая проверка поднимает отдельный Compose-проект с собственными PostgreSQL и RabbitMQ, динамическими портами и тестовыми настройками из `docker-compose.test.yml`. Миграции выполняются внутри тестового контейнера с подключёнными файлами Alembic. Заранее запускать основной Compose-проект и применять миграции в рабочей БД для этих проверок не нужно. После проверки тестовый проект и его ресурсы удаляются.
+Docker-проверки по умолчанию пропускаются. Они требуют работающего Docker Engine, Compose и возможности собрать образ приложения. Каждая проверка поднимает отдельный Compose-проект с собственными PostgreSQL и RabbitMQ, динамическими портами и тестовыми настройками из `docker-compose.test.yml`. Миграции выполняются внутри тестового контейнера из файлов, включённых в образ; подключать Poetry или файлы Alembic с хоста не нужно. Заранее запускать основной Compose-проект и применять миграции в рабочей БД для этих проверок не нужно. После проверки тестовый проект и его ресурсы удаляются.
 
 Сквозной сценарий POST → Outbox → RabbitMQ → consumer → HTTP webhook → GET:
 

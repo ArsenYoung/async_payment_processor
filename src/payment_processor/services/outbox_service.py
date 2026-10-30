@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 
-from faststream.rabbit import RabbitBroker
 from sqlalchemy.exc import (
     DBAPIError,
     DisconnectionError,
@@ -20,6 +19,7 @@ from payment_processor.core.logging import processing_fields
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.messaging import topology
 from payment_processor.messaging.schemas import PaymentCreatedEvent
+from payment_processor.services.ports import EventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +34,13 @@ class OutboxService:
     def __init__(
         self,
         session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-        broker: RabbitBroker,
+        publisher: EventPublisher,
         repository_factory: Callable[
             [AsyncSession], OutboxRepository
         ] = OutboxRepository,
     ) -> None:
         self._session_scope_factory = session_scope_factory
-        self._broker = broker
+        self._publisher = publisher
         self._repository_factory = repository_factory
 
     async def run(
@@ -111,8 +111,8 @@ class OutboxService:
                         failed += 1
                     else:
                         try:
-                            await topology.publish_payment_event(
-                                self._broker, event, timeout=timeout
+                            await self._publisher.publish_payment_created(
+                                event, timeout=timeout
                             )
                         except Exception as error:
                             delay = min(60, 2 ** min(record.attempts, 6))

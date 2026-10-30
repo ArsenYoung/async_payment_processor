@@ -126,9 +126,12 @@ def test_clean_startup_and_migrations(smoke_stack: SmokeStack) -> None:
         "payment_processor.rabbitmq_to_payment_worker.main",
     ]
     assert not consumer.get("volumes")
-    assert config["services"]["api"]["depends_on"] == {
-        "migrate": {"condition": "service_completed_successfully"}
-    }
+    assert not config["services"]["migrate"].get("volumes")
+    for service in ("api", *WORKERS):
+        assert (
+            config["services"][service]["depends_on"]["migrate"]["condition"]
+            == "service_completed_successfully"
+        )
 
     stack.compose("build", "migrate", timeout=600)
     stack.compose(
@@ -138,6 +141,9 @@ def test_clean_startup_and_migrations(smoke_stack: SmokeStack) -> None:
         "migrate",
         "python",
         "-c",
+        "from pathlib import Path; "
+        "assert Path('/app/alembic.ini').is_file(); "
+        "assert Path('/app/alembic/versions').is_dir(); "
         "import fastapi, uvicorn, pydantic, pydantic_settings, asyncpg, sqlalchemy; "
         "import greenlet, faststream.rabbit, alembic, httpx; "
         "import payment_processor.api.main; "

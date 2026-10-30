@@ -13,7 +13,6 @@ from payment_processor.api.schemas.payment import (
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.application.commands import CreatePaymentCommand, GetPaymentQuery
 from payment_processor.services.payment_service import (
-    IdempotencyConflictError,
     PaymentService,
 )
 

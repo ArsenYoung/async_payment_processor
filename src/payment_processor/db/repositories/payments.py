@@ -5,13 +5,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_processor.db.models import Outbox, OutboxEventType, Payment, PaymentStatus
-from payment_processor.messaging.schemas import PaymentCreatedPayload
+from payment_processor.db.models import Outbox, OutboxEventType, Payment
+from payment_processor.services.payment_rules import can_deliver_webhook
 
 
 class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+        self._event_payload: dict[str, object] | None = None
+
+    def set_event_payload(self, payload: dict[str, object]) -> None:
+        self._event_payload = payload
 
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
         return await self.session.get(Payment, payment_id)
@@ -29,13 +33,15 @@ class PaymentRepository:
         return result.scalar_one_or_none()
 
     async def mark_webhook_delivered(self, payment: Payment) -> None:
-        if payment.status == PaymentStatus.PENDING or payment.processed_at is None:
+        if not can_deliver_webhook(payment.status, payment.processed_at):
             raise ValueError("Webhook delivery requires a completed payment")
         if payment.webhook_delivered_at is None:
             payment.webhook_delivered_at = datetime.now(UTC)
             await self.session.flush()
 
     async def save_with_outbox(self, payment: Payment) -> Payment:
+        if self._event_payload is None:
+            raise ValueError("Event payload is required")
         self.session.add(payment)
         await self.session.flush()
         await self.session.refresh(payment)
@@ -43,16 +49,7 @@ class PaymentRepository:
             Outbox(
                 payment_id=payment.id,
                 event_type=OutboxEventType.PAYMENT_CREATED,
-                payload=PaymentCreatedPayload.model_validate(
-                    {
-                        "payment_id": payment.id,
-                        "amount": payment.amount,
-                        "currency": payment.currency,
-                        "description": payment.description,
-                        "metadata": payment.payment_metadata,
-                        "webhook_url": payment.webhook_url,
-                    }
-                ).model_dump(mode="json"),
+                payload=self._event_payload,
             )
         )
         return payment

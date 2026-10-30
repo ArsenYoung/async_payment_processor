@@ -18,6 +18,7 @@ from payment_processor.db.models import Outbox
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.services.outbox_service import OutboxService, PublicationResult
 from payment_processor.services.payment_service import PaymentService
@@ -69,7 +70,9 @@ async def test_broker_failure_then_recovery_delivers_all_pending_events(
     recovery_broker: RabbitBroker,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = OutboxService(outbox_database.session_scope, recovery_broker)
+    service = OutboxService(
+        outbox_database.session_scope, RabbitEventPublisher(recovery_broker)
+    )
     with monkeypatch.context() as patch:
         publish = AsyncMock(side_effect=ConnectionError("Broker unavailable"))
         patch.setattr(recovery_broker, "publish", publish)
@@ -109,7 +112,9 @@ async def test_new_publisher_connection_resumes_only_unpublished_events(
     try:
         await first_broker.connect()
         await topology.declare_payment_topology(first_broker)
-        service = OutboxService(outbox_database.session_scope, first_broker)
+        service = OutboxService(
+            outbox_database.session_scope, RabbitEventPublisher(first_broker)
+        )
         assert await service.publish_batch(1) == PublicationResult(1, 0)
     finally:
         await first_broker.stop()
@@ -148,7 +153,7 @@ async def test_restart_after_confirmed_publication_repeats_same_event_ids(
             if failure == "cancellation":
                 raise asyncio.CancelledError()
 
-    service = OutboxService(failing_scope, recovery_broker)
+    service = OutboxService(failing_scope, RabbitEventPublisher(recovery_broker))
     expected_error = OperationalError if failure == "commit" else asyncio.CancelledError
     with pytest.raises(expected_error):
         await service.publish_batch(10)
@@ -174,7 +179,7 @@ async def _publish_with_new_connection(database: Database, expected_count: int) 
     try:
         await broker.connect()
         await topology.declare_payment_topology(broker)
-        service = OutboxService(database.session_scope, broker)
+        service = OutboxService(database.session_scope, RabbitEventPublisher(broker))
         assert await service.publish_batch(10) == PublicationResult(expected_count, 0)
         assert await service.publish_batch(10) == PublicationResult(0, 0)
     finally:
@@ -214,7 +219,9 @@ async def test_operator_recovers_only_selected_event_with_same_identity(
         session.add_all(recovery_events)
         for record in recovery_events:
             record.payload = {**record.payload, "amount": "invalid"}
-    service = OutboxService(outbox_database.session_scope, recovery_broker)
+    service = OutboxService(
+        outbox_database.session_scope, RabbitEventPublisher(recovery_broker)
+    )
     assert await service.publish_batch(10) == PublicationResult(0, 3)
     await recover_event(outbox_database, recovery_events[0].id, payload=original)
     records = await _read_events(outbox_database)

@@ -7,7 +7,6 @@ from time import perf_counter
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.application.commands import (
@@ -20,36 +19,17 @@ from payment_processor.core.logging import processing_fields
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.repositories.payments import (
     PaymentRepository,
-    is_idempotency_key_violation,
 )
-from payment_processor.services.errors import PaymentNotFoundError
+from payment_processor.services.contracts import CreatePaymentCommand, CreatePaymentInput
+from payment_processor.services.payment_creation import (
+    PaymentCreationService,
+)
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.webhooks import WebhookClient
+from payment_processor.services.payment_processing import PaymentProcessingService
+from payment_processor.services.ports import PaymentGateway, WebhookSender
+from payment_processor.services.webhook_delivery import WebhookDeliveryService
 
 logger = logging.getLogger(__name__)
-
-
-def _json_values_equal(left: object, right: object) -> bool:
-    if isinstance(left, dict) and isinstance(right, dict):
-        return left.keys() == right.keys() and all(
-            _json_values_equal(left[key], right[key]) for key in left
-        )
-    if isinstance(left, list) and isinstance(right, list):
-        return len(left) == len(right) and all(
-            _json_values_equal(left_value, right_value)
-            for left_value, right_value in zip(left, right, strict=True)
-        )
-    if isinstance(left, bool) or isinstance(right, bool):
-        return type(left) is type(right) and left == right
-    if isinstance(left, (int, float, Decimal)) and isinstance(
-        right, (int, float, Decimal)
-    ):
-        return Decimal(str(left)) == Decimal(str(right))
-    return type(left) is type(right) and left == right
-
-
-class IdempotencyConflictError(Exception):
-    pass
 
 
 class PaymentService:
@@ -60,11 +40,18 @@ class PaymentService:
             PaymentRepository
         ),
         *,
-        gateway: PaymentGatewaySimulator | None = None,
+        gateway: PaymentGateway | None = None,
     ) -> None:
-        self._session_scope_factory = session_scope_factory
-        self._repository_factory = repository_factory
-        self._gateway = gateway if gateway is not None else PaymentGatewaySimulator()
+        selected_gateway = gateway if gateway is not None else PaymentGatewaySimulator()
+        self._creation = PaymentCreationService(
+            session_scope_factory, repository_factory
+        )
+        self._processing = PaymentProcessingService(
+            session_scope_factory, selected_gateway, repository_factory
+        )
+        self._webhook_delivery = WebhookDeliveryService(
+            session_scope_factory, repository_factory
+        )
 
     async def get_payment(self, query: GetPaymentQuery | UUID) -> Payment | None:
         if isinstance(query, UUID):
