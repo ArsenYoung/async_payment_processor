@@ -13,6 +13,7 @@ from payment_processor.core.config import Settings
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging.schemas import PaymentResultPayload
+from payment_processor.services.errors import WebhookRequestTimeoutError
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
 
@@ -240,6 +241,52 @@ async def test_client_closes_transport_on_exit(
         await client.send(completed_payment)
 
 
+@pytest.mark.asyncio
+async def test_webhook_request_deadline_covers_slow_response_headers(
+    completed_payment: Payment,
+) -> None:
+    async def handle(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.2)
+        return httpx.Response(204)
+
+    async with WebhookClient(
+        timeout=5.0,
+        request_deadline=0.01,
+        transport=httpx.MockTransport(handle),
+    ) as client:
+        with pytest.raises(WebhookRequestTimeoutError):
+            await client.send(completed_payment)
+
+
+@pytest.mark.asyncio
+async def test_webhook_stream_does_not_consume_unused_large_response_body(
+    completed_payment: Payment,
+) -> None:
+    class LargeResponseStream(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            raise AssertionError("webhook response body must not be consumed")
+            yield b""
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    response_stream = LargeResponseStream()
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(204, stream=response_stream)
+
+    async with WebhookClient(
+        timeout=5.0,
+        request_deadline=1.0,
+        transport=httpx.MockTransport(handle),
+    ) as client:
+        await client.send(completed_payment)
+
+    assert response_stream.closed
+
+
 @pytest.mark.parametrize(
     "timeout", [0, -0.1, float("nan"), float("inf"), float("-inf")]
 )
@@ -271,3 +318,18 @@ def test_webhook_timeout_default_and_environment(
     assert Settings(**values).webhook_timeout == 5.0
     monkeypatch.setenv("WEBHOOK_TIMEOUT", "2.5")
     assert Settings(**values).webhook_timeout == 2.5
+
+
+def test_webhook_request_deadline_default_and_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "_env_file": None,
+        "database_url": "postgresql+asyncpg://test:test@localhost/test",
+        "rabbitmq_url": "amqp://test:test@localhost/",
+        "api_key": "test-key",
+    }
+    monkeypatch.delenv("WEBHOOK_REQUEST_DEADLINE", raising=False)
+    assert Settings(**values).webhook_request_deadline == 5.0
+    monkeypatch.setenv("WEBHOOK_REQUEST_DEADLINE", "2.5")
+    assert Settings(**values).webhook_request_deadline == 2.5

@@ -17,6 +17,7 @@ from payment_processor.messaging.schemas import (
     PaymentCreatedEvent,
     PaymentResultPayload,
 )
+from payment_processor.services.errors import WebhookRequestTimeoutError
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
@@ -24,7 +25,7 @@ from payment_processor.services.webhooks import WebhookClient
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
-@pytest.mark.parametrize("failure", ["http", "connection", "timeout"])
+@pytest.mark.parametrize("failure", ["http", "connection", "timeout", "deadline"])
 @pytest.mark.parametrize("successful_attempt", [2, 3])
 async def test_automatic_webhook_retry_preserves_result_and_recovers(
     outbox_database: Database,
@@ -58,6 +59,8 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
         if len(requests) < successful_attempt:
             if failure == "http":
                 return httpx.Response(503)
+            if failure == "deadline":
+                raise WebhookRequestTimeoutError("Webhook request deadline exceeded")
             error = httpx.ConnectError if failure == "connection" else httpx.ReadTimeout
             raise error("Temporary webhook failure", request=request)
         return httpx.Response(204)

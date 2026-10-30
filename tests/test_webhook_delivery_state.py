@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
+from payment_processor.services.errors import WebhookRequestTimeoutError
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
 
@@ -195,7 +196,7 @@ async def test_failed_transaction_rolls_back_delivery_mark_and_allows_retry(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
-@pytest.mark.parametrize("failure", ["http", "network", "timeout"])
+@pytest.mark.parametrize("failure", ["http", "network", "timeout", "deadline"])
 async def test_webhook_failure_preserves_result_without_marking_delivery(
     outbox_database: Database,
     completed_payment: Payment,
@@ -212,6 +213,8 @@ async def test_webhook_failure_preserves_result_without_marking_delivery(
             raise httpx.ConnectError("Connection lost", request=request)
         if failure == "timeout":
             raise httpx.ReadTimeout("Webhook timed out", request=request)
+        if failure == "deadline":
+            raise WebhookRequestTimeoutError("Webhook request deadline exceeded")
         return httpx.Response(503)
 
     async with WebhookClient(

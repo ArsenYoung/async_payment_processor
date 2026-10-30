@@ -114,7 +114,8 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
     policy = runtime.register.call_args.kwargs["retry_policy"]
     assert policy.next_retry(1).delay == consumer_main.settings.retry_base_delay
     runtime.webhook_factory.assert_called_once_with(
-        timeout=consumer_main.settings.webhook_timeout
+        timeout=consumer_main.settings.webhook_timeout,
+        request_deadline=consumer_main.settings.webhook_request_deadline,
     )
     consumer_main.create_broker.assert_called_once_with(
         prefetch_count=consumer_main.settings.consumer_prefetch_count
