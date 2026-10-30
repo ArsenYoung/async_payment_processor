@@ -24,6 +24,7 @@ from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.services.outbox_service import OutboxService, PublicationResult
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
@@ -101,7 +102,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
     ) as webhook:
         async with retry_consumer(service, webhook):
             assert await OutboxService(
-                outbox_database.session_scope, routing_broker
+                outbox_database.session_scope, RabbitEventPublisher(routing_broker)
             ).publish_batch(10) == PublicationResult(1, 0)
             await wait_for_log(caplog, "consume", "completed")
             await topology.publish_payment_event(routing_broker, retry_event)
@@ -246,7 +247,9 @@ async def test_real_outbox_retry_logs_only_saved_publication_attempts(
     exchange = await routing_broker.declare_exchange(topology.PAYMENTS_EXCHANGE)
     queue = await routing_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
     await queue.unbind(exchange, routing_key=topology.PAYMENTS_NEW_QUEUE.routing())
-    service = OutboxService(outbox_database.session_scope, routing_broker)
+    service = OutboxService(
+        outbox_database.session_scope, RabbitEventPublisher(routing_broker)
+    )
     try:
         assert await service.publish_batch(10) == PublicationResult(0, 1)
     finally:
@@ -305,7 +308,9 @@ async def test_rollback_never_logs_a_saved_success(
     ) as webhook:
         with pytest.raises(RuntimeError):
             if operation == "outbox":
-                await OutboxService(failing_commit, routing_broker).publish_batch(10)
+                await OutboxService(
+                    failing_commit, RabbitEventPublisher(routing_broker)
+                ).publish_batch(10)
             elif operation == "payment":
                 await service.process_payment(retry_event.payload.payment_id)
             else:
