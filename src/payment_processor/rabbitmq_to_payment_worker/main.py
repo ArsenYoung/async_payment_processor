@@ -26,7 +26,10 @@ async def _consume() -> None:
     database = Database(settings.database_url)
     try:
         await database.check_connection()
-        async with WebhookClient(timeout=settings.webhook_timeout) as webhook_client:
+        async with WebhookClient(
+            timeout=settings.webhook_timeout,
+            request_deadline=settings.webhook_request_deadline,
+        ) as webhook_client:
             payment_service = PaymentService(database.session_scope)
             broker = create_broker()
             try:

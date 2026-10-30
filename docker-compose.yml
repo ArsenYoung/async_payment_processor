@@ -94,6 +94,7 @@ services:
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5.0}
+      WEBHOOK_REQUEST_DEADLINE: ${WEBHOOK_REQUEST_DEADLINE:-5.0}
       RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1.0}
     depends_on:
       postgres:

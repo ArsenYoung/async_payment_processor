@@ -16,6 +16,10 @@ class PaymentNotFoundError(LookupError):
         super().__init__(f"Payment {payment_id} not found")
 
 
+class WebhookRequestTimeoutError(TimeoutError):
+    """The complete webhook request exceeded its configured deadline."""
+
+
 def is_retryable_processing_error(error: BaseException) -> bool:
     if isinstance(
         error,
