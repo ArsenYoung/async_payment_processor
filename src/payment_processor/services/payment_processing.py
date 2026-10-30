@@ -13,6 +13,7 @@ from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.payment_rules import can_process
 from payment_processor.services.ports import PaymentGateway
+from payment_processor.services.ports import PaymentProcessingStore
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,7 @@ class PaymentProcessingService:
         self,
         session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
         gateway: PaymentGateway,
-        repository_factory: Callable[
-            [AsyncSession], PaymentRepository
-        ] = PaymentRepository,
+        repository_factory: Callable[[AsyncSession], PaymentProcessingStore] = PaymentRepository,
     ) -> None:
         self._session_scope_factory = session_scope_factory
         self._gateway = gateway

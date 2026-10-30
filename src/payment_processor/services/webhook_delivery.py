@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from payment_processor.core.logging import processing_fields
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.errors import PaymentNotFoundError
-from payment_processor.services.ports import WebhookSender
+from payment_processor.services.ports import WebhookDeliveryStore, WebhookSender
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +18,7 @@ class WebhookDeliveryService:
     def __init__(
         self,
         session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-        repository_factory: Callable[
-            [AsyncSession], PaymentRepository
-        ] = PaymentRepository,
+        repository_factory: Callable[[AsyncSession], WebhookDeliveryStore] = PaymentRepository,
     ) -> None:
         self._session_scope_factory = session_scope_factory
         self._repository_factory = repository_factory

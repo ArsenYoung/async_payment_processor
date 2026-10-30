@@ -14,6 +14,7 @@ from payment_processor.db.repositories.payments import (
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload
 from payment_processor.services.payment_rules import matches_create_command
+from payment_processor.services.ports import PaymentCreationStore, PaymentReader
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,7 @@ class PaymentCreationService:
     def __init__(
         self,
         session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-        repository_factory: Callable[
-            [AsyncSession], PaymentRepository
-        ] = PaymentRepository,
+        repository_factory: Callable[[AsyncSession], PaymentCreationStore] = PaymentRepository,
     ) -> None:
         self._session_scope_factory = session_scope_factory
         self._repository_factory = repository_factory
@@ -43,7 +42,8 @@ class PaymentCreationService:
 
     async def get(self, payment_id: UUID) -> Payment | None:
         async with self._session_scope_factory() as session:
-            return await self._repository_factory(session).find_by_id(payment_id)
+            repository: PaymentReader = self._repository_factory(session)
+            return await repository.find_by_id(payment_id)
 
     async def _create(
         self, command: CreatePaymentCommand, idempotency_key: str
