@@ -360,7 +360,9 @@ async def test_database_error_propagates_and_rolls_back_entire_batch(
             ConnectionError("Broker disconnected"),
         ]
     service = OutboxService(
-        outbox_database.session_scope, broker, repository_factory=FailingRepository
+        outbox_database.session_scope,
+        RabbitEventPublisher(broker),
+        repository_factory=FailingRepository,
     )
 
     with pytest.raises(IntegrityError):
