@@ -42,9 +42,6 @@ services:
   migrate:
     <<: *application
     command: ["alembic", "upgrade", "head"]
-    volumes:
-      - ./alembic.ini:/app/alembic.ini:ro
-      - ./alembic:/app/alembic:ro
     depends_on:
       postgres:
         condition: service_healthy

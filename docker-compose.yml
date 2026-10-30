@@ -57,8 +57,8 @@ services:
       timeout: 5s
       retries: 5
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
     image: payment-processing-worker:local
@@ -75,8 +75,8 @@ services:
       OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1.0}
       OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
@@ -96,9 +96,23 @@ services:
       RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1.0}
       CONSUMER_PREFETCH_COUNT: ${CONSUMER_PREFETCH_COUNT:-5}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       rabbitmq:
+        condition: service_healthy
+
+  migrate:
+    image: payment-processing-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      API_KEY: ${API_KEY:?API_KEY must be set in .env}
+    depends_on:
+      postgres:
         condition: service_healthy
 
 volumes:
