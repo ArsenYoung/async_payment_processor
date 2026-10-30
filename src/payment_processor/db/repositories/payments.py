@@ -12,10 +12,10 @@ from payment_processor.services.payment_rules import can_deliver_webhook
 class PaymentRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self._outbox_payload: dict[str, object] | None = None
+        self._event_payload: dict[str, object] | None = None
 
-    def set_outbox_payload(self, payload: dict[str, object]) -> None:
-        self._outbox_payload = payload
+    def set_event_payload(self, payload: dict[str, object]) -> None:
+        self._event_payload = payload
 
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
         return await self.session.get(Payment, payment_id)
@@ -40,8 +40,8 @@ class PaymentRepository:
             await self.session.flush()
 
     async def save_with_outbox(self, payment: Payment) -> Payment:
-        if self._outbox_payload is None:
-            raise ValueError("Outbox payload is required")
+        if self._event_payload is None:
+            raise ValueError("Event payload is required")
         self.session.add(payment)
         await self.session.flush()
         await self.session.refresh(payment)
@@ -49,7 +49,7 @@ class PaymentRepository:
             Outbox(
                 payment_id=payment.id,
                 event_type=OutboxEventType.PAYMENT_CREATED,
-                payload=self._outbox_payload,
+                payload=self._event_payload,
             )
         )
         return payment

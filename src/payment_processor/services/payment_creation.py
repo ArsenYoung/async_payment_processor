@@ -63,7 +63,7 @@ class PaymentCreationService:
                 idempotency_key=idempotency_key,
                 webhook_url=command.webhook_url,
             )
-            repository.set_outbox_payload(build_payment_created_payload(payment))
+            repository.set_event_payload(build_payment_created_payload(payment))
             return await repository.save_with_outbox(payment)
 
     async def _recover(
