@@ -12,9 +12,12 @@ from payment_processor.api.schemas.payment import (
 )
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.application.commands import CreatePaymentCommand, GetPaymentQuery
-from payment_processor.services.payment_service import (
-    PaymentService,
+from payment_processor.application.results import (
+    PaymentCreatedResult,
+    PaymentDetailsResult,
 )
+from payment_processor.services.payment_creation import IdempotencyConflictError
+from payment_processor.services.payment_service import PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -51,11 +54,12 @@ async def create_payment(
             detail="Idempotency key was used with a different request",
         ) from error
 
-    http_request.state.payment_id = payment.id
+    result = PaymentCreatedResult.from_payment(payment)
+    http_request.state.payment_id = result.payment_id
     return PaymentCreateResponse(
-        payment_id=payment.id,
-        status=payment.status,
-        created_at=payment.created_at,
+        payment_id=result.payment_id,
+        status=result.status,
+        created_at=result.created_at,
     )
 
 
@@ -77,15 +81,16 @@ async def get_payment(
             detail="Payment not found",
         )
 
+    result = PaymentDetailsResult.from_payment(payment)
     return PaymentDetailsResponse(
-        payment_id=payment.id,
-        amount=payment.amount,
-        currency=payment.currency,
-        description=payment.description,
-        metadata=payment.payment_metadata,
-        idempotency_key=payment.idempotency_key,
-        webhook_url=payment.webhook_url,
-        status=payment.status,
-        created_at=payment.created_at,
-        processed_at=payment.processed_at,
+        payment_id=result.payment_id,
+        amount=result.amount,
+        currency=result.currency,
+        description=result.description,
+        metadata=result.metadata,
+        idempotency_key=result.idempotency_key,
+        webhook_url=result.webhook_url,
+        status=result.status,
+        created_at=result.created_at,
+        processed_at=result.processed_at,
     )

@@ -23,8 +23,8 @@ from payment_processor.core.logging import (
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
-from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
 from payment_processor.messaging.publisher import RabbitEventPublisher
+from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.services.outbox_service import OutboxService, PublicationResult
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator

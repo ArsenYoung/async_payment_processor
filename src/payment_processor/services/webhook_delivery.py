@@ -14,11 +14,13 @@ from payment_processor.services.ports import WebhookDeliveryStore, WebhookSender
 logger = logging.getLogger(__name__)
 
 
-class WebhookDeliveryService:
+class DeliverPaymentWebhookUseCase:
     def __init__(
         self,
         session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-        repository_factory: Callable[[AsyncSession], WebhookDeliveryStore] = PaymentRepository,
+        repository_factory: Callable[
+            [AsyncSession], WebhookDeliveryStore
+        ] = PaymentRepository,
     ) -> None:
         self._session_scope_factory = session_scope_factory
         self._repository_factory = repository_factory
@@ -59,3 +61,6 @@ class WebhookDeliveryService:
                 "duration_ms": (perf_counter() - started) * 1000,
             },
         )
+
+
+WebhookDeliveryService = DeliverPaymentWebhookUseCase
