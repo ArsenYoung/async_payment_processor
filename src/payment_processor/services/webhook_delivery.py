@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from payment_processor.core.logging import processing_fields
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.errors import PaymentNotFoundError
-from payment_processor.services.payment_rules import can_deliver_webhook
 from payment_processor.services.ports import WebhookSender
 
 logger = logging.getLogger(__name__)
@@ -39,10 +38,6 @@ class WebhookDeliveryService:
                     raise PaymentNotFoundError(payment_id)
                 outcome = "already_delivered"
                 if payment.webhook_delivered_at is None:
-                    if not can_deliver_webhook(payment.status, payment.processed_at):
-                        raise ValueError(
-                            "Webhook delivery requires a completed payment"
-                        )
                     await sender.send(payment)
                     await repository.mark_webhook_delivered(payment)
                     outcome = "delivered"
