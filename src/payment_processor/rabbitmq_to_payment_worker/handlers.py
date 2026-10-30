@@ -11,7 +11,9 @@ from payment_processor.core.logging import processing_context, processing_fields
 from payment_processor.messaging import topology
 from payment_processor.messaging.retry import RetryPolicy, read_attempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.errors import is_retryable_processing_error
+from payment_processor.services.payment_event_failures import (
+    classify_payment_event_failure,
+)
 from payment_processor.services.payment_service import PaymentService
 from payment_processor.services.webhooks import WebhookClient
 
@@ -68,12 +70,14 @@ def register_payment_subscriber(
                     event.payload.payment_id, webhook_client
                 )
             except Exception as error:
-                retry = None
-                if reason != "invalid_message" and is_retryable_processing_error(error):
-                    retry = retry_policy.next_retry(attempt)
-                    reason = (
-                        "retryable_processing_error" if retry else "attempts_exhausted"
-                    )
+                decision = classify_payment_event_failure(
+                    error,
+                    message_valid=reason != "invalid_message",
+                    attempt=attempt,
+                    retry_policy=retry_policy,
+                )
+                retry = decision.retry
+                reason = decision.reason
                 logger.log(
                     logging.WARNING if retry else logging.ERROR,
                     "Payment event handling failed",
