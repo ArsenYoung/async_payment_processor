@@ -11,11 +11,15 @@ MAX_ATTEMPTS = 3
 ATTEMPT_HEADER = "x-payment-attempt"
 
 
-def read_attempt(headers: Mapping[str, Any]) -> int:
-    attempt = headers.get(ATTEMPT_HEADER, 1)
+def validate_attempt(attempt: int) -> int:
     if type(attempt) is not int or not 1 <= attempt <= MAX_ATTEMPTS:
         raise ValueError(f"Attempt must be an integer between 1 and {MAX_ATTEMPTS}")
     return attempt
+
+
+def read_attempt(headers: Mapping[str, Any]) -> int:
+    attempt = headers.get(ATTEMPT_HEADER, 1)
+    return validate_attempt(attempt)
 
 
 def failure_headers(
@@ -66,8 +70,7 @@ class RetryPolicy:
         self._base_delay = base_delay
 
     def next_retry(self, attempt: int) -> RetryAttempt | None:
-        if type(attempt) is not int or not 1 <= attempt <= MAX_ATTEMPTS:
-            raise ValueError(f"Attempt must be an integer between 1 and {MAX_ATTEMPTS}")
+        validate_attempt(attempt)
         if attempt == MAX_ATTEMPTS:
             return None
         return RetryAttempt(

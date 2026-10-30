@@ -26,6 +26,7 @@ from payment_processor.db.models import Outbox
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
 from payment_processor.services import outbox_service as outbox_module
@@ -299,9 +300,10 @@ async def test_publisher_stops_publisher_before_closing_broker_and_database(
         call.broker.stop(),
         call.database.dispose(),
     ]
-    runtime.service_factory.assert_called_once_with(
-        runtime.database.session_scope, runtime.broker
-    )
+    session_scope, publisher = runtime.service_factory.call_args.args
+    assert session_scope is runtime.database.session_scope
+    assert isinstance(publisher, RabbitEventPublisher)
+    assert publisher._broker is runtime.broker
     _assert_signal_cleanup(runtime.signals)
 
 

@@ -11,8 +11,9 @@ from payment_processor.api.schemas.payment import (
     PaymentDetailsResponse,
 )
 from payment_processor.api.schemas.validation import validate_database_text
+from payment_processor.services.contracts import CreatePaymentCommand
+from payment_processor.services.payment_creation import IdempotencyConflictError
 from payment_processor.services.payment_service import (
-    IdempotencyConflictError,
     PaymentService,
 )
 
@@ -35,7 +36,16 @@ async def create_payment(
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentCreateResponse:
     try:
-        payment = await payment_service.create_payment(request, idempotency_key)
+        payment = await payment_service.create_payment(
+            CreatePaymentCommand(
+                amount=request.amount,
+                currency=request.currency,
+                description=request.description,
+                metadata=request.metadata,
+                webhook_url=str(request.webhook_url),
+            ),
+            idempotency_key,
+        )
     except IdempotencyConflictError as error:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

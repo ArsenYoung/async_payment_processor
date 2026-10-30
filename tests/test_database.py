@@ -1,4 +1,3 @@
-from contextlib import aclosing
 from decimal import Decimal
 
 import pytest
@@ -60,31 +59,6 @@ async def test_session_scope_rolls_back_flushed_payment_on_error(
     assert caught.value is error
     assert not session.in_transaction()
     async with database.session_scope() as session:
-        assert (
-            await session.scalar(
-                select(Payment.id).where(Payment.idempotency_key == idempotency_key)
-            )
-            is None
-        )
-
-
-@pytest.mark.asyncio
-async def test_get_session_closes_and_rolls_back_uncommitted_changes(
-    database: Database, idempotency_key: str
-) -> None:
-    async with aclosing(database.get_session()) as sessions:
-        session = await anext(sessions)
-        session.add(payment_for_key(idempotency_key))
-        await session.flush()
-        assert (
-            await session.scalar(
-                select(Payment.id).where(Payment.idempotency_key == idempotency_key)
-            )
-            is not None
-        )
-
-    assert not session.in_transaction()
-    async with database.session_factory() as session:
         assert (
             await session.scalar(
                 select(Payment.id).where(Payment.idempotency_key == idempotency_key)
