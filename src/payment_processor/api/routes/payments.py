@@ -11,8 +11,7 @@ from payment_processor.api.schemas.payment import (
     PaymentDetailsResponse,
 )
 from payment_processor.api.schemas.validation import validate_database_text
-from payment_processor.services.contracts import CreatePaymentCommand
-from payment_processor.services.payment_creation import IdempotencyConflictError
+from payment_processor.application.commands import CreatePaymentCommand, GetPaymentQuery
 from payment_processor.services.payment_service import (
     PaymentService,
 )
@@ -43,8 +42,8 @@ async def create_payment(
                 description=request.description,
                 metadata=request.metadata,
                 webhook_url=str(request.webhook_url),
-            ),
-            idempotency_key,
+                idempotency_key=idempotency_key,
+            )
         )
     except IdempotencyConflictError as error:
         raise HTTPException(
@@ -71,7 +70,7 @@ async def get_payment(
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentDetailsResponse:
     request.state.payment_id = payment_id
-    payment = await payment_service.get_payment(payment_id)
+    payment = await payment_service.get_payment(GetPaymentQuery(payment_id))
     if payment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
