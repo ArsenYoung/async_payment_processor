@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_processor.db.models import Outbox, OutboxEventType, Payment, PaymentStatus
+from payment_processor.db.models import Outbox, OutboxEventType, Payment
+from payment_processor.services.payment_rules import can_deliver_webhook
 
 
 class PaymentRepository:
@@ -32,7 +33,7 @@ class PaymentRepository:
         return result.scalar_one_or_none()
 
     async def mark_webhook_delivered(self, payment: Payment) -> None:
-        if payment.status == PaymentStatus.PENDING or payment.processed_at is None:
+        if not can_deliver_webhook(payment.status, payment.processed_at):
             raise ValueError("Webhook delivery requires a completed payment")
         if payment.webhook_delivered_at is None:
             payment.webhook_delivered_at = datetime.now(UTC)
