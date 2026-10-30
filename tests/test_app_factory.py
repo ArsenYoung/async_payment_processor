@@ -84,8 +84,7 @@ async def test_payment_route_uses_database_of_its_application(
 
 
 @pytest.mark.asyncio
-async def test_lifespan_checks_supplied_database_and_releases_resources(
-) -> None:
+async def test_lifespan_checks_supplied_database_and_releases_resources() -> None:
     database = Mock(spec=Database)
     resources = Mock()
     resources.attach_mock(database, "database")

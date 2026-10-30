@@ -1,5 +1,7 @@
 # Payment Processing Service
 
+[![CI](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsenYoung/async_payment_processor/actions/workflows/ci.yml)
+
 Асинхронный сервис обработки платежей на FastAPI, PostgreSQL и RabbitMQ.
 
 ## Текущий статус
@@ -198,6 +200,17 @@ curl -sS -H "X-API-Key: ${API_KEY}" \
 Для consumer, запущенного на хосте через Poetry, можно запустить тот же приёмник командой `poetry run uvicorn webhook_receiver:app --app-dir tests/e2e --host 127.0.0.1 --port 8081` и использовать `webhook_url=http://127.0.0.1:8081/webhooks`. Для consumer в Docker `localhost` относится к его собственному контейнеру; в примере выше используется имя `payment-webhook-demo`.
 
 ## Retry и Dead Letter Queue
+
+### Контракт авторизации и количества попыток
+
+Операции API и `/health` требуют `X-API-Key`. Swagger UI, ReDoc и OpenAPI
+остаются публичными; ключ передаётся через кнопку **Authorize** в Swagger.
+
+Три попытки означают первую обработку и два управляемых повтора. Это ограничение
+цепочки retry, а не абсолютное число доставок: RabbitMQ redelivery, сбой после
+подтверждения публикации retry или повторная публикация Outbox могут привести к
+дополнительной доставке. Неповторяемые ошибки и некорректные сообщения попадают
+в DLQ сразу, без расходования всех трёх попыток.
 
 ### Очереди и маршрутизация
 
