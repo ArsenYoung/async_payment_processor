@@ -59,9 +59,11 @@ docker compose up -d outbox-to-rabbitmq-worker rabbitmq-to-payment-worker
 
 ### Проверка Outbox
 
-Публикатор выбирает записи с `published_at IS NULL` по времени создания и ID, блокируя партию через `FOR UPDATE SKIP LOCKED`. Успешная публикация увеличивает `attempts`, устанавливает `published_at` и очищает `last_error`. Ошибка публикации увеличивает `attempts` и сохраняет `last_error`; запись остаётся доступной для следующего опроса. При откате транзакции эти изменения не сохраняются.
+Публикатор выбирает неопубликованные записи вне карантина, у которых наступил `next_attempt_at` или срок ещё не назначен. Порядок — время создания и ID; блокировка — `FOR UPDATE SKIP LOCKED`. Успех увеличивает `attempts`, устанавливает `published_at`, очищает `last_error` и `next_attempt_at`.
 
-Для Outbox нет лимита в три попытки: его `attempts` считает попытки публикации и не связан с номером попытки consumer. Временные ошибки БД повторяются после `OUTBOX_POLL_INTERVAL`; ошибки публикации также оставляют событие для следующего опроса. Outbox не отправляет такие записи в DLQ.
+Невалидное содержимое события или несовпадающий `payment_id` отправляет запись в карантин: сохраняются `quarantined_at`, причина в `last_error` и увеличенный `attempts`. Полная партия таких записей освобождает путь следующим событиям. Ошибки отправки, включая timeout, отсутствие подтверждения и общий отказ RabbitMQ, назначают повтор через 1, 2, 4, 8, 16, 32, затем 60 секунд. Число повторов не ограничено, инфраструктурные ошибки не отправляют записи в карантин. Неизвестные ошибки отправки также повторяются; их причину следует проверять в логах.
+
+`attempts` считает попытки публикации Outbox и не связан с тремя попытками consumer. Временные ошибки БД повторяются после `OUTBOX_POLL_INTERVAL`. При откате транзакции изменения состояния не сохраняются. Outbox сохраняет проблемные события в PostgreSQL и не отправляет их в DLQ.
 
 После POST задайте `PAYMENT_ID` из ответа и выполните запрос к БД основного Compose-проекта:
 
@@ -72,6 +74,7 @@ docker compose exec -T postgres sh -c \
   sh "$PAYMENT_ID" <<'SQL'
 SELECT p.id AS payment_id, p.status, p.processed_at, p.webhook_delivered_at,
        o.id AS event_id, o.published_at, o.attempts,
+       o.next_attempt_at, o.quarantined_at,
        o.last_error IS NOT NULL AS has_publication_error
 FROM payments AS p
 LEFT JOIN outbox AS o ON o.payment_id = p.id

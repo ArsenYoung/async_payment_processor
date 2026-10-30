@@ -2,13 +2,14 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import copy
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from faststream.rabbit import RabbitBroker
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,13 @@ async def test_broker_failure_then_recovery_delivers_all_pending_events(
         assert record.attempts == 1
         assert record.last_error == "ConnectionError: Broker unavailable"
     await _assert_messages(recovery_broker, [])
+    assert await service.publish_batch(10) == PublicationResult(0, 0)
+    async with outbox_database.session_scope() as session:
+        await session.execute(
+            update(Outbox)
+            .where(Outbox.published_at.is_(None))
+            .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
 
     assert await service.publish_batch(10) == PublicationResult(3, 0)
     await _assert_messages(recovery_broker, recovery_events)

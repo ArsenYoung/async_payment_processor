@@ -3,12 +3,14 @@ import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import httpx
 import pytest
 from faststream.rabbit import RabbitBroker
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.core import worker as worker_module
@@ -249,6 +251,13 @@ async def test_real_outbox_retry_logs_only_saved_publication_attempts(
         assert await service.publish_batch(10) == PublicationResult(0, 1)
     finally:
         await queue.bind(exchange, routing_key=topology.PAYMENTS_NEW_QUEUE.routing())
+    assert await service.publish_batch(10) == PublicationResult(0, 0)
+    async with outbox_database.session_scope() as session:
+        await session.execute(
+            update(Outbox)
+            .where(Outbox.published_at.is_(None))
+            .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
     assert await service.publish_batch(10) == PublicationResult(1, 0)
     captured = [
         entry for entry in entries(caplog) if entry.get("operation") == "outbox_publish"
