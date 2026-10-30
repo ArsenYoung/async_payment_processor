@@ -54,6 +54,7 @@ def test_outbox_settings_defaults(settings_values: dict) -> None:
     assert settings.outbox_batch_size == 100
     assert settings.outbox_poll_interval == 1.0
     assert settings.outbox_publish_timeout == 5.0
+    assert settings.consumer_prefetch_count == 5
 
 
 def test_outbox_settings_read_environment(
@@ -62,12 +63,14 @@ def test_outbox_settings_read_environment(
     monkeypatch.setenv("OUTBOX_BATCH_SIZE", "7")
     monkeypatch.setenv("OUTBOX_POLL_INTERVAL", "0.25")
     monkeypatch.setenv("OUTBOX_PUBLISH_TIMEOUT", "2.5")
+    monkeypatch.setenv("CONSUMER_PREFETCH_COUNT", "9")
 
     settings = Settings(**settings_values)
 
     assert settings.outbox_batch_size == 7
     assert settings.outbox_poll_interval == 0.25
     assert settings.outbox_publish_timeout == 2.5
+    assert settings.consumer_prefetch_count == 9
 
 
 @pytest.mark.parametrize(
@@ -76,6 +79,9 @@ def test_outbox_settings_read_environment(
         ("outbox_batch_size", 0),
         ("outbox_batch_size", -1),
         ("outbox_batch_size", 1.5),
+        ("consumer_prefetch_count", 0),
+        ("consumer_prefetch_count", -1),
+        ("consumer_prefetch_count", 1.5),
         *[
             (name, value)
             for name in ("outbox_poll_interval", "outbox_publish_timeout")
