@@ -2,13 +2,14 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import copy
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from faststream.rabbit import RabbitBroker
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,13 @@ async def test_broker_failure_then_recovery_delivers_all_pending_events(
         assert record.attempts == 1
         assert record.last_error == "ConnectionError: Broker unavailable"
     await _assert_messages(recovery_broker, [])
+    assert await service.publish_batch(10) == PublicationResult(0, 0)
+    async with outbox_database.session_scope() as session:
+        await session.execute(
+            update(Outbox)
+            .where(Outbox.published_at.is_(None))
+            .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
 
     assert await service.publish_batch(10) == PublicationResult(3, 0)
     await _assert_messages(recovery_broker, recovery_events)
@@ -191,3 +199,125 @@ async def _read_events(database: Database) -> list[Outbox]:
             select(Outbox).order_by(Outbox.created_at, Outbox.id)
         )
         return list(result.all())
+
+
+@pytest.mark.asyncio
+async def test_operator_recovers_only_selected_event_with_same_identity(
+    outbox_database: Database,
+    recovery_events: list[Outbox],
+    recovery_broker: RabbitBroker,
+) -> None:
+    from payment_processor.operations.outbox_recovery import recover_event
+
+    original = recovery_events[0].payload.copy()
+    async with outbox_database.session_scope() as session:
+        session.add_all(recovery_events)
+        for record in recovery_events:
+            record.payload = {**record.payload, "amount": "invalid"}
+    service = OutboxService(outbox_database.session_scope, recovery_broker)
+    assert await service.publish_batch(10) == PublicationResult(0, 3)
+    await recover_event(outbox_database, recovery_events[0].id, payload=original)
+    records = await _read_events(outbox_database)
+    assert records[0].quarantined_at is None
+    assert records[0].next_attempt_at is None
+    assert records[0].published_at is None
+    assert records[0].attempts == 1
+    assert records[0].last_error is not None
+    assert all(record.quarantined_at is not None for record in records[1:])
+    assert await service.publish_batch(10) == PublicationResult(1, 0)
+    await _assert_messages(recovery_broker, [records[0]])
+    records = await _read_events(outbox_database)
+    assert records[0].attempts == 2
+    assert records[0].last_error is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload_kind", ["invalid", "wrong_payment", "stored_invalid"])
+async def test_invalid_repair_keeps_quarantine_and_original_payload(
+    outbox_database: Database,
+    recovery_events: list[Outbox],
+    payload_kind: str,
+) -> None:
+    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.operations.outbox_recovery import recover_event
+
+    saved = recovery_events[0]
+    async with outbox_database.session_scope() as session:
+        session.add(saved)
+        saved.payload = {**saved.payload, "amount": "invalid"}
+        await OutboxRepository(session).quarantine(saved, "Invalid amount")
+    replacement = None
+    if payload_kind == "invalid":
+        replacement = {**saved.payload, "amount": "still-invalid"}
+    elif payload_kind == "wrong_payment":
+        replacement = {**saved.payload, "amount": "10.50", "payment_id": str(uuid4())}
+    with pytest.raises(ValueError):
+        await recover_event(outbox_database, saved.id, payload=replacement)
+    [record, *_] = await _read_events(outbox_database)
+    assert record.payload == saved.payload
+    assert record.quarantined_at == saved.quarantined_at
+    assert record.attempts == 1
+    assert record.last_error == "Invalid amount"
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_missing_pending_and_published_events(
+    outbox_database: Database,
+    recovery_events: list[Outbox],
+) -> None:
+    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.operations.outbox_recovery import recover_event
+
+    with pytest.raises(LookupError):
+        await recover_event(outbox_database, uuid4())
+    with pytest.raises(ValueError):
+        await recover_event(outbox_database, recovery_events[0].id)
+    async with outbox_database.session_scope() as session:
+        session.add(recovery_events[0])
+        await OutboxRepository(session).mark_published(recovery_events[0])
+    with pytest.raises(ValueError):
+        await recover_event(outbox_database, recovery_events[0].id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_recovery_releases_event_only_once(
+    outbox_database: Database,
+    recovery_events: list[Outbox],
+) -> None:
+    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.operations.outbox_recovery import recover_event
+
+    async with outbox_database.session_scope() as session:
+        session.add(recovery_events[0])
+        await OutboxRepository(session).quarantine(recovery_events[0], "Old error")
+    async with asyncio.timeout(5):
+        results = await asyncio.gather(
+            recover_event(outbox_database, recovery_events[0].id),
+            recover_event(outbox_database, recovery_events[0].id),
+            return_exceptions=True,
+        )
+    assert sum(result is None for result in results) == 1
+    assert sum(isinstance(result, ValueError) for result in results) == 1
+
+
+def test_recovery_cli_validates_json_before_connecting(tmp_path, monkeypatch):
+    from payment_processor.operations import outbox_recovery
+
+    payload_file = tmp_path / "payload.json"
+    payload_file.write_text("[]")
+    run = AsyncMock()
+    monkeypatch.setattr(outbox_recovery, "_run", run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "outbox_recovery",
+            "--event-id",
+            str(uuid4()),
+            "--payload-file",
+            str(payload_file),
+        ],
+    )
+    with pytest.raises(SystemExit) as error:
+        outbox_recovery.main()
+    assert error.value.code == 2
+    run.assert_not_awaited()

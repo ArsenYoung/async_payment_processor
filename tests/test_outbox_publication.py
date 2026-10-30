@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from copy import copy
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
@@ -10,7 +11,7 @@ import pytest_asyncio
 from aio_pika.exceptions import DeliveryError
 from faststream.rabbit import RabbitBroker
 from pamqp.commands import Basic
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
@@ -165,6 +166,13 @@ async def test_mixed_batch_saves_failure_and_retries_only_unpublished_event(
 
     broker.publish.side_effect = None
     broker.publish.reset_mock()
+    assert await service.publish_batch(10) == PublicationResult(0, 0)
+    async with outbox_database.session_scope() as session:
+        await session.execute(
+            update(Outbox)
+            .where(Outbox.published_at.is_(None))
+            .values(next_attempt_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
     assert await service.publish_batch(10) == PublicationResult(published=1, failed=0)
     broker.publish.assert_awaited_once()
     assert broker.publish.await_args.args[0]["event_id"] == str(outbox_events[1].id)
@@ -328,8 +336,10 @@ async def test_database_error_propagates_and_rolls_back_entire_batch(
             await super().mark_published(event)
             await self._fail_second(event)
 
-        async def record_failure(self, event: Outbox, error: str) -> None:
-            await super().record_failure(event, error)
+        async def record_failure(
+            self, event: Outbox, error: str, *, next_attempt_at: datetime | None = None
+        ) -> None:
+            await super().record_failure(event, error, next_attempt_at=next_attempt_at)
             await self._fail_second(event)
 
         async def _fail_second(self, event: Outbox) -> None:
@@ -366,3 +376,56 @@ async def _read_events(database: Database) -> list[Outbox]:
             select(Outbox).order_by(Outbox.created_at, Outbox.id)
         )
         return list(result.all())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_kind", ["amount", "payment_id"])
+async def test_full_invalid_batch_does_not_starve_valid_event(
+    outbox_database: Database,
+    outbox_events: list[Outbox],
+    broker: Mock,
+    invalid_kind: str,
+) -> None:
+    async with outbox_database.session_scope() as session:
+        session.add_all(outbox_events[:2])
+        for record in outbox_events[:2]:
+            value = "invalid" if invalid_kind == "amount" else str(uuid4())
+            record.payload = {**record.payload, invalid_kind: value}
+    service = OutboxService(outbox_database.session_scope, broker)
+    assert await service.publish_batch(2) == PublicationResult(0, 2)
+    broker.publish.assert_not_awaited()
+    assert await service.publish_batch(2) == PublicationResult(1, 0)
+    broker.publish.assert_awaited_once()
+    records = await _read_events(outbox_database)
+    assert all(record.quarantined_at is not None for record in records[:2])
+    assert all(record.published_at is None for record in records[:2])
+    assert records[2].published_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "attempts,delay", [(0, 1), (1, 2), (5, 32), (6, 60), (1000, 60)]
+)
+async def test_broker_failure_defers_without_quarantine(
+    outbox_database: Database,
+    outbox_events: list[Outbox],
+    broker: Mock,
+    attempts: int,
+    delay: int,
+) -> None:
+    async with outbox_database.session_scope() as session:
+        session.add_all(outbox_events)
+        for record in outbox_events:
+            record.attempts = attempts
+    broker.publish.side_effect = ConnectionError("Broker unavailable")
+    service = OutboxService(outbox_database.session_scope, broker)
+    before = datetime.now(UTC)
+    assert await service.publish_batch(10) == PublicationResult(0, 3)
+    after = datetime.now(UTC)
+    assert await service.publish_batch(10) == PublicationResult(0, 0)
+    for record in await _read_events(outbox_database):
+        assert record.quarantined_at is None
+        assert record.published_at is None
+        assert record.attempts == attempts + 1
+        assert before + timedelta(seconds=delay) <= record.next_attempt_at
+        assert record.next_attempt_at <= after + timedelta(seconds=delay)

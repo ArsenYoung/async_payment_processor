@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 
 from faststream.rabbit import RabbitBroker
@@ -99,21 +100,33 @@ class OutboxService:
                         queue=topology.PAYMENTS_NEW_QUEUE.name,
                         publication_attempt=record.attempts + 1,
                     )
-                    failure = None
+                    failure: Exception | None = None
                     try:
                         event = PaymentCreatedEvent.from_outbox(record)
-                        await topology.publish_payment_event(
-                            self._broker, event, timeout=timeout
-                        )
-                    except Exception as error:
-                        await repository.record_failure(
+                    except ValueError as error:
+                        await repository.quarantine(
                             record, f"{type(error).__name__}: {error}"
                         )
                         failure = error
                         failed += 1
                     else:
-                        await repository.mark_published(record)
-                        published += 1
+                        try:
+                            await topology.publish_payment_event(
+                                self._broker, event, timeout=timeout
+                            )
+                        except Exception as error:
+                            delay = min(60, 2 ** min(record.attempts, 6))
+                            await repository.record_failure(
+                                record,
+                                f"{type(error).__name__}: {error}",
+                                next_attempt_at=datetime.now(UTC)
+                                + timedelta(seconds=delay),
+                            )
+                            failure = error
+                            failed += 1
+                        else:
+                            await repository.mark_published(record)
+                            published += 1
                     results.append(
                         (
                             {
