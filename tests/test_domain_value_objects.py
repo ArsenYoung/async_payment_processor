@@ -9,7 +9,9 @@ def test_money_accepts_positive_amount() -> None:
     assert Money(Decimal("10.50"), "RUB").amount == Decimal("10.50")
 
 
-@pytest.mark.parametrize("amount", [Decimal("0"), Decimal("-1")])
+@pytest.mark.parametrize(
+    "amount", [Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")]
+)
 def test_money_rejects_non_positive_amount(amount: Decimal) -> None:
     with pytest.raises(ValueError):
         Money(amount, "RUB")

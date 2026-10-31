@@ -4,9 +4,9 @@ from typing import Protocol
 from uuid import UUID
 
 from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
-from payment_processor.application.records import PaymentInput, PaymentRecord
+from payment_processor.application.records import PaymentInput
 from payment_processor.application.results import PaymentDetailsResult
-from payment_processor.domain.payment import PaymentStatus
+from payment_processor.domain.payment import Payment, PaymentStatus
 
 
 class PaymentGateway(Protocol):
@@ -24,25 +24,25 @@ class EventPublisher(Protocol):
 
 
 class PaymentReader(Protocol):
-    async def find_by_id(self, payment_id: UUID) -> PaymentRecord | None: ...
+    async def find_by_id(self, payment_id: UUID) -> Payment | None: ...
 
 
 class PaymentCreationStore(PaymentReader, Protocol):
-    async def find_by_idempotency_key(
-        self, idempotency_key: str
-    ) -> PaymentRecord | None: ...
+    async def find_by_idempotency_key(self, idempotency_key: str) -> Payment | None: ...
 
     def set_event_payload(self, payload: dict[str, object]) -> None: ...
 
-    async def save_with_outbox(self, payment: PaymentInput) -> PaymentRecord: ...
+    async def save_with_outbox(self, payment: PaymentInput) -> Payment: ...
 
 
 class PaymentProcessingStore(Protocol):
-    async def find_by_id_for_update(self, payment_id: UUID) -> PaymentRecord | None: ...
+    async def save(self, payment: Payment) -> None: ...
+
+    async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None: ...
 
 
 class WebhookDeliveryStore(PaymentProcessingStore, Protocol):
-    async def mark_webhook_delivered(self, payment: PaymentRecord) -> None: ...
+    async def mark_webhook_delivered(self, payment: Payment) -> None: ...
 
 
 class PaymentRepository(PaymentCreationStore, WebhookDeliveryStore, Protocol):

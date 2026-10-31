@@ -1,17 +1,27 @@
 import json
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue, field_validator
 
+from payment_processor.domain.events import OutboxEventType as OutboxEventType
 from payment_processor.domain.payment import PaymentCurrency
 
 
-class OutboxEventType(StrEnum):
-    PAYMENT_CREATED = "payment.created"
+class OutboxEventRecord(Protocol):
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def payment_id(self) -> UUID: ...
+
+    @property
+    def event_type(self) -> OutboxEventType: ...
+
+    @property
+    def payload(self) -> dict[str, Any]: ...
 
 
 class OutboxRecord(Protocol):
@@ -52,7 +62,7 @@ class PaymentCreatedEvent(BaseModel):
     payload: PaymentCreatedPayload
 
     @classmethod
-    def from_outbox(cls, outbox: OutboxRecord) -> "PaymentCreatedEvent":
+    def from_outbox(cls, outbox: OutboxEventRecord) -> "PaymentCreatedEvent":
         event = cls.model_validate(
             {
                 "event_id": outbox.id,

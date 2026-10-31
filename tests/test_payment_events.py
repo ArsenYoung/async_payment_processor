@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -197,3 +200,48 @@ async def test_saved_event_preserves_identity_across_idempotent_requests(
 
     assert restored == event
     assert PaymentCreatedEvent.model_validate_json(restored.model_dump_json()) == event
+
+
+def test_event_can_be_built_from_a_record_without_orm(event_payload: dict) -> None:
+    record = SimpleNamespace(
+        id=uuid4(),
+        payment_id=UUID(event_payload["payment_id"]),
+        event_type="payment.created",
+        payload=event_payload.copy(),
+    )
+
+    event = PaymentCreatedEvent.from_outbox(record)
+
+    assert event.model_dump(mode="json") == {
+        "event_id": str(record.id),
+        "event_type": "payment.created",
+        "payload": event_payload,
+    }
+
+
+def test_messaging_schemas_import_without_database_dependencies() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import importlib.abc
+import sys
+
+class BlockDatabaseImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "sqlalchemy" or fullname.startswith("payment_processor.db"):
+            raise ImportError(f"Unexpected infrastructure import: {fullname}")
+
+sys.meta_path.insert(0, BlockDatabaseImports())
+import payment_processor.messaging.schemas
+import payment_processor.application.commands
+import payment_processor.application.results
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

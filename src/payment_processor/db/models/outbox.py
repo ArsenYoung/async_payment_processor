@@ -17,8 +17,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from payment_processor.application.events import OutboxEventType as OutboxEventType
 from payment_processor.db.models.base import Base, enum_values
+from payment_processor.domain.events import OutboxEventType
 
 
 class Outbox(Base):
