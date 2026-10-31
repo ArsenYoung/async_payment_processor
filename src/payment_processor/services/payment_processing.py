@@ -1,14 +1,12 @@
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
 from time import perf_counter
 from uuid import UUID
 
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
 from payment_processor.services.errors import PaymentNotFoundError
-from payment_processor.services.payment_rules import can_process
 from payment_processor.services.ports import PaymentGateway, PaymentProcessingStore
 
 logger = logging.getLogger(__name__)
@@ -36,9 +34,9 @@ class ProcessPaymentUseCase:
                 if payment is None:
                     raise PaymentNotFoundError(payment_id)
                 outcome = "already_processed"
-                if can_process(payment.status):
-                    payment.status = await self._gateway.process()
-                    payment.processed_at = datetime.now(UTC)
+                if payment.can_process:
+                    payment.process(await self._gateway.process())
+                    await repository.save(payment)
                     outcome = "processed"
         except Exception as error:
             logger.warning(

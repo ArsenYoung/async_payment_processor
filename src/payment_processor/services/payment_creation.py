@@ -6,8 +6,8 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 
 from payment_processor.application.results import PaymentCreatedResult
-from payment_processor.db.models import Payment
 from payment_processor.db.repositories.payments import is_idempotency_key_violation
+from payment_processor.domain.payment import Payment
 from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload

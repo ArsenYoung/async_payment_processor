@@ -1,12 +1,13 @@
-from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_processor.db.models import Outbox, OutboxEventType, Payment
-from payment_processor.services.payment_rules import can_deliver_webhook
+from payment_processor.db.mappers.payment import to_domain, to_model, update_model
+from payment_processor.db.models import Outbox, OutboxEventType
+from payment_processor.db.models.payment import Payment as PaymentModel
+from payment_processor.domain.payment import Payment
 
 
 class PaymentRepository:
@@ -18,33 +19,41 @@ class PaymentRepository:
         self._event_payload = payload
 
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
-        return await self.session.get(Payment, payment_id)
+        model = await self.session.get(PaymentModel, payment_id)
+        return to_domain(model) if model is not None else None
 
     async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None:
         result = await self.session.execute(
-            select(Payment).where(Payment.id == payment_id).with_for_update()
+            select(PaymentModel).where(PaymentModel.id == payment_id).with_for_update()
         )
-        return result.scalar_one_or_none()
+        model = result.scalar_one_or_none()
+        return to_domain(model) if model is not None else None
 
     async def find_by_idempotency_key(self, idempotency_key: str) -> Payment | None:
         result = await self.session.execute(
-            select(Payment).where(Payment.idempotency_key == idempotency_key)
+            select(PaymentModel).where(PaymentModel.idempotency_key == idempotency_key)
         )
-        return result.scalar_one_or_none()
+        model = result.scalar_one_or_none()
+        return to_domain(model) if model is not None else None
+
+    async def save(self, payment: Payment) -> None:
+        model = await self.session.get(PaymentModel, payment.id)
+        if model is None:
+            raise ValueError("Cannot save a payment that does not exist")
+        update_model(model, payment)
+        await self.session.flush()
 
     async def mark_webhook_delivered(self, payment: Payment) -> None:
-        if not can_deliver_webhook(payment.status, payment.processed_at):
-            raise ValueError("Webhook delivery requires a completed payment")
-        if payment.webhook_delivered_at is None:
-            payment.webhook_delivered_at = datetime.now(UTC)
-            await self.session.flush()
+        payment.mark_webhook_delivered()
+        await self.save(payment)
 
     async def save_with_outbox(self, payment: Payment) -> Payment:
         if self._event_payload is None:
             raise ValueError("Event payload is required")
-        self.session.add(payment)
+        model = to_model(payment)
+        self.session.add(model)
         await self.session.flush()
-        await self.session.refresh(payment)
+        await self.session.refresh(model)
         self.session.add(
             Outbox(
                 payment_id=payment.id,
@@ -52,7 +61,7 @@ class PaymentRepository:
                 payload=self._event_payload,
             )
         )
-        return payment
+        return to_domain(model)
 
 
 def is_idempotency_key_violation(error: IntegrityError) -> bool:

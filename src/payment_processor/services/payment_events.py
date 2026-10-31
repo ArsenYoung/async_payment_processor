@@ -1,6 +1,6 @@
 from typing import Any
 
-from payment_processor.db.models import Payment
+from payment_processor.domain.payment import Payment
 from payment_processor.messaging.schemas import PaymentCreatedPayload
 
 

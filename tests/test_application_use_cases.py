@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -13,7 +12,7 @@ from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
-from payment_processor.db.models import PaymentCurrency, PaymentStatus
+from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.payment_creation import (
     CreatePaymentUseCase,
@@ -32,8 +31,8 @@ def store_scope(repository: object) -> object:
     return scope()
 
 
-def payment(status: PaymentStatus = PaymentStatus.PENDING) -> SimpleNamespace:
-    return SimpleNamespace(
+def payment(status: PaymentStatus = PaymentStatus.PENDING) -> Payment:
+    return Payment(
         id=uuid4(),
         amount=Decimal("10.50"),
         currency=PaymentCurrency.RUB,
@@ -102,6 +101,7 @@ async def test_process_use_case_calls_gateway_for_pending_payment() -> None:
     assert isinstance(result, PaymentDetailsResult)
     assert saved.status == PaymentStatus.SUCCEEDED
     gateway.process.assert_awaited_once()
+    repository.save.assert_awaited_once_with(saved)
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ def test_payment_details_result_maps_without_exposing_orm_to_api() -> None:
     assert result.status == PaymentStatus.SUCCEEDED
 
 
-def command_for(saved: SimpleNamespace) -> CreatePaymentCommand:
+def command_for(saved: Payment) -> CreatePaymentCommand:
     return CreatePaymentCommand(
         amount=saved.amount,
         currency=saved.currency,
@@ -190,6 +190,7 @@ async def test_process_completed_payment_preserves_result(
 
     assert result == expected
     gateway.process.assert_not_awaited()
+    repository.save.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -338,3 +339,21 @@ async def test_transaction_failure_propagates_instead_of_returning_result(
             await ProcessPaymentUseCase(failing_scope, gateway).process(saved.id)
 
     assert caught.value is error
+
+
+@pytest.mark.asyncio
+async def test_invalid_gateway_outcome_is_not_saved() -> None:
+    saved = payment()
+    repository = AsyncMock()
+    repository.find_by_id_for_update.return_value = saved
+    gateway = AsyncMock()
+    gateway.process.return_value = PaymentStatus.PENDING
+
+    with pytest.raises(ValueError):
+        await ProcessPaymentUseCase(lambda: store_scope(repository), gateway).process(
+            saved.id
+        )
+
+    assert saved.status == PaymentStatus.PENDING
+    assert saved.processed_at is None
+    repository.save.assert_not_awaited()

@@ -3,7 +3,7 @@ from typing import Protocol
 from uuid import UUID
 
 from payment_processor.application.results import PaymentDetailsResult
-from payment_processor.db.models import Payment, PaymentStatus
+from payment_processor.domain.payment import Payment, PaymentStatus
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 
 
@@ -34,6 +34,8 @@ class PaymentCreationStore(PaymentReader, Protocol):
 
 
 class PaymentProcessingStore(Protocol):
+    async def save(self, payment: Payment) -> None: ...
+
     async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None: ...
 
 

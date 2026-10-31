@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.payment_service import PaymentService
 
@@ -120,7 +121,7 @@ async def test_concurrent_processing_waits_and_reuses_committed_result(
         return status
 
     class WaitingRepository(PaymentRepository):
-        async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None:
+        async def find_by_id_for_update(self, payment_id: UUID) -> DomainPayment | None:
             nonlocal waiter_pid
             waiter_pid = await self.session.scalar(select(func.pg_backend_pid()))
             waiter_started.set()
