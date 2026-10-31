@@ -89,3 +89,11 @@ async def test_repository_requires_explicit_save_for_domain_changes(
     async with outbox_database.session_scope() as session:
         restored = await PaymentRepository(session).find_by_id(payment.id)
         assert restored == loaded
+
+
+@pytest.mark.parametrize("amount", [Decimal("-1"), Decimal("1.001"), Decimal("1E16")])
+def test_mapping_rejects_corrupt_persisted_amount(amount: Decimal) -> None:
+    model = to_model(make_payment())
+    model.amount = amount
+    with pytest.raises(ValueError):
+        to_domain(model)

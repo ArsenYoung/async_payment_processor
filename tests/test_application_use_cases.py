@@ -446,3 +446,32 @@ async def test_external_deadline_releases_lease(
     repository.release_lease.assert_awaited_once()
     repository.save.assert_not_awaited()
     repository.mark_webhook_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("amount", Decimal("0")),
+        ("amount", Decimal("-1")),
+        ("amount", Decimal("NaN")),
+        ("amount", Decimal("1.001")),
+        ("amount", Decimal("1E16")),
+        ("currency", "GBP"),
+        ("idempotency_key", ""),
+        ("idempotency_key", "a" * 256),
+        ("idempotency_key", "invalid\x00key"),
+        ("webhook_url", "ftp://example.com"),
+    ],
+)
+async def test_creation_rejects_invalid_command_before_opening_store(
+    field: str, value: object,
+) -> None:
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    scope = Mock()
+    command = replace(command_for(payment()), **{field: value})
+    with pytest.raises(ValueError):
+        await CreatePaymentUseCase(scope).create(command)
+    scope.assert_not_called()

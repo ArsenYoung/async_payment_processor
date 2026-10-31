@@ -12,6 +12,7 @@ from payment_processor.api.schemas.payment import (
 )
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.domain.validation import IDEMPOTENCY_KEY_MAX_LENGTH
 from payment_processor.services.payment_creation import IdempotencyConflictError
 from payment_processor.services.payment_service import PaymentService
 
@@ -28,7 +29,7 @@ async def create_payment(
     http_request: Request,
     idempotency_key: Annotated[
         str,
-        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+        Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
         AfterValidator(validate_database_text),
     ],
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
