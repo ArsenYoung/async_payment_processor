@@ -13,6 +13,7 @@ from pydantic import (
     field_validator,
 )
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.db.models import (
     Outbox,
     OutboxEventType,
@@ -80,15 +81,19 @@ class PaymentResultPayload(BaseModel):
 
     @classmethod
     def from_payment(cls, payment: Payment) -> "PaymentResultPayload":
+        return cls.from_result(PaymentDetailsResult.from_payment(payment))
+
+    @classmethod
+    def from_result(cls, result: PaymentDetailsResult) -> "PaymentResultPayload":
         return cls.model_validate(
             {
-                "payment_id": payment.id,
-                "status": payment.status,
-                "amount": payment.amount,
-                "currency": payment.currency,
-                "description": payment.description,
-                "metadata": payment.payment_metadata,
-                "created_at": payment.created_at,
-                "processed_at": payment.processed_at,
+                "payment_id": result.payment_id,
+                "status": result.status,
+                "amount": result.amount,
+                "currency": result.currency,
+                "description": result.description,
+                "metadata": result.metadata,
+                "created_at": result.created_at,
+                "processed_at": result.processed_at,
             }
         )

@@ -7,6 +7,7 @@ from typing import Self
 
 import httpx
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
 from payment_processor.db.models import Payment
 from payment_processor.messaging.schemas import PaymentResultPayload
@@ -50,7 +51,8 @@ class WebhookClient:
         started = perf_counter()
         fields = processing_fields(payment_id=str(payment.id), operation="webhook_http")
         try:
-            payload = PaymentResultPayload.from_payment(payment)
+            result = PaymentDetailsResult.from_payment(payment)
+            payload = PaymentResultPayload.from_result(result)
             try:
                 async with asyncio.timeout(self._request_deadline):
                     async with self._client.stream(

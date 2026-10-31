@@ -4,24 +4,21 @@ from contextlib import AbstractAsyncContextManager
 from time import perf_counter
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from payment_processor.core.logging import processing_fields
-from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.ports import WebhookDeliveryStore, WebhookSender
 
 logger = logging.getLogger(__name__)
 
 
-class WebhookDeliveryService:
+class DeliverPaymentWebhookUseCase:
     def __init__(
         self,
-        session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-        repository_factory: Callable[[AsyncSession], WebhookDeliveryStore] = PaymentRepository,
+        store_scope_factory: Callable[
+            [], AbstractAsyncContextManager[WebhookDeliveryStore]
+        ],
     ) -> None:
-        self._session_scope_factory = session_scope_factory
-        self._repository_factory = repository_factory
+        self._store_scope_factory = store_scope_factory
 
     async def deliver(self, payment_id: UUID, sender: WebhookSender) -> None:
         started = perf_counter()
@@ -29,8 +26,7 @@ class WebhookDeliveryService:
             payment_id=str(payment_id), operation="webhook_delivery"
         )
         try:
-            async with self._session_scope_factory() as session:
-                repository = self._repository_factory(session)
+            async with self._store_scope_factory() as repository:
                 payment = await repository.find_by_id_for_update(payment_id)
                 if payment is None:
                     raise PaymentNotFoundError(payment_id)
@@ -59,3 +55,6 @@ class WebhookDeliveryService:
                 "duration_ms": (perf_counter() - started) * 1000,
             },
         )
+
+
+WebhookDeliveryService = DeliverPaymentWebhookUseCase
