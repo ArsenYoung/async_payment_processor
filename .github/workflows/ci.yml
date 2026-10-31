@@ -83,3 +83,100 @@ jobs:
 
       - name: Run tests
         run: poetry run pytest -q
+
+  migration-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: payments_migration_test
+          POSTGRES_USER: payments
+          POSTGRES_PASSWORD: payments
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U payments -d payments_migration_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://payments:payments@localhost:5432/payments_migration_test
+      RABBITMQ_URL: amqp://unused:unused@localhost:5672/
+      API_KEY: migration-test-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          version: 2.1.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - run: poetry install --no-interaction
+      - name: Check complete migration lifecycle on disposable database
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          {
+            poetry run alembic upgrade head
+            poetry run alembic downgrade base
+            poetry run alembic upgrade head
+            poetry run alembic check
+          } 2>&1 | tee artifacts/migrations.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: migration-lifecycle-logs
+          path: artifacts/
+
+  docker-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, e2e]
+    env:
+      DATABASE_URL: postgresql+asyncpg://unused:unused@localhost:5432/unused
+      RABBITMQ_URL: amqp://unused:unused@localhost:5672/
+      API_KEY: docker-test-key
+      RUN_DOCKER_SMOKE: "1"
+      RUN_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: snok/install-poetry@v1
+        with:
+          version: 2.1.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - run: poetry install --no-interaction
+      - name: Run isolated Docker tests
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          poetry run pytest -q --capture=tee-sys --junitxml=artifacts/docker.xml tests/${{ matrix.suite }} 2>&1 | tee artifacts/docker.log
+      - name: Collect remaining stack logs and clean up
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          docker ps --all > artifacts/containers.txt
+          for project in $(docker ps --all --format '{{.Label "com.docker.compose.project"}}' | sort -u); do
+            case "$project" in
+              payment-smoke-*|payment-persistence-*|payment-e2e-*)
+                docker compose -f docker-compose.test.yml -p "$project" --profile smoke logs --no-color > "artifacts/$project.log" 2>&1 || true
+                docker compose -f docker-compose.test.yml -p "$project" --profile smoke down --volumes --remove-orphans
+                ;;
+            esac
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-${{ matrix.suite }}-logs
+          path: artifacts/
