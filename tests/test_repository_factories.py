@@ -2,7 +2,15 @@ from contextlib import asynccontextmanager
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
+from sqlalchemy.exc import (
+    DBAPIError,
+    DisconnectionError,
+    IntegrityError,
+    InterfaceError,
+    OperationalError,
+    ProgrammingError,
+)
+from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from payment_processor.application.errors import (
     IdempotencyKeyViolationError,
@@ -114,13 +122,25 @@ async def test_scope_commits_without_error() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["query", "commit"])
-@pytest.mark.parametrize("unavailable", [False, True])
+@pytest.mark.parametrize(
+    ("error", "unavailable"),
+    [
+        (OperationalError("SELECT", {}, RuntimeError("unavailable")), True),
+        (InterfaceError("SELECT", {}, RuntimeError("disconnected")), True),
+        (
+            DBAPIError("SELECT", {}, RuntimeError("lost"), connection_invalidated=True),
+            True,
+        ),
+        (DisconnectionError("disconnected"), True),
+        (DatabaseTimeoutError("pool exhausted"), True),
+        (ProgrammingError("SELECT", {}, RuntimeError("invalid query")), False),
+        (DBAPIError("SELECT", {}, RuntimeError("unknown error")), False),
+        (IntegrityError("INSERT", {}, RuntimeError("constraint error")), False),
+    ],
+)
 async def test_outbox_scope_translates_only_temporary_database_errors(
-    stage: str, unavailable: bool
+    stage: str, error: Exception, unavailable: bool
 ) -> None:
-    error = (OperationalError if unavailable else ProgrammingError)(
-        "SELECT", {}, RuntimeError("database error")
-    )
     exited = False
 
     @asynccontextmanager
@@ -136,7 +156,7 @@ async def test_outbox_scope_translates_only_temporary_database_errors(
     scope = outbox_repository_scope(session_scope, Mock())
 
     with pytest.raises(
-        PersistenceUnavailableError if unavailable else ProgrammingError
+        PersistenceUnavailableError if unavailable else type(error)
     ) as caught:
         async with scope():
             if stage == "query":

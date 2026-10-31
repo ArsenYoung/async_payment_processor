@@ -1,5 +1,3 @@
-from uuid import UUID
-
 import httpx
 from sqlalchemy.exc import (
     DBAPIError,
@@ -9,15 +7,7 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
-
-class PaymentNotFoundError(LookupError):
-    def __init__(self, payment_id: UUID) -> None:
-        self.payment_id = payment_id
-        super().__init__(f"Payment {payment_id} not found")
-
-
-class WebhookRequestTimeoutError(httpx.TimeoutException):
-    """The complete webhook request exceeded its configured deadline."""
+from payment_processor.application.errors import PersistenceUnavailableError
 
 
 def is_retryable_processing_error(error: BaseException) -> bool:
@@ -25,6 +15,7 @@ def is_retryable_processing_error(error: BaseException) -> bool:
         error,
         (
             httpx.HTTPError,
+            PersistenceUnavailableError,
             TimeoutError,
             ConnectionError,
             DatabaseTimeoutError,

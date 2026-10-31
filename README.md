@@ -108,22 +108,31 @@ poetry run python -m payment_processor.operations.outbox_recovery \
 
 ```text
 src/payment_processor/
+├── adapters/                    # HTTP webhook и симулятор платёжного шлюза
 ├── api/                         # HTTP API
+├── application/                 # команды, результаты, события и порты
+├── bootstrap.py                 # сборка зависимостей для entrypoint'ов
 ├── core/                        # конфигурация приложения
 ├── db/                          # модели, репозитории и сессии PostgreSQL
+├── domain/                      # типы платежа и бизнес-инварианты
 ├── messaging/                   # схемы событий и топология RabbitMQ
 ├── outbox_to_rabbitmq_worker/    # публикатор PostgreSQL Outbox → RabbitMQ
 ├── rabbitmq_to_payment_worker/  # обработчик сообщений
 └── services/
     ├── payment_service.py
     ├── outbox_service.py
-    └── payment_gateway_simulator.py
+    ├── payment_creation.py
+    ├── payment_lookup.py
+    ├── payment_processing.py
+    └── webhook_delivery.py
 
 alembic/
 └── versions/     # миграции базы данных
 ```
 
-`PaymentService` объединяет создание, чтение, обработку платежа и доставку webhook; проверка идемпотентности находится в его закрытых методах. `OutboxService` публикует сохранённые события в RabbitMQ. `PaymentGatewaySimulator` эмулирует внешний шлюз и передаётся в `PaymentService` как зависимость.
+`PaymentService` делегирует создание, чтение, обработку платежа и доставку webhook отдельным use case'ам. Проверка идемпотентности находится в `CreatePaymentUseCase`. `OutboxService` публикует сохранённые события через `EventPublisher`. Сервисы получают репозитории, шлюз и отправитель webhook через порты из `application`; они не импортируют ORM или транспортные библиотеки. `PaymentGatewaySimulator` — одна из реализаций `PaymentGateway`.
+
+API и воркеры собирают зависимости через `bootstrap.py` и фабрики scoped-репозиториев. SQLAlchemy-адаптер создаёт ORM-объект из `NewPayment`, сохраняет платёж вместе с Outbox и преобразует конфликт idempotency key после rollback. При временной недоступности БД Outbox-адаптер передаёт `PersistenceUnavailableError` с исходной ошибкой в `__cause__`.
 
 При обработке сервис блокирует строку платежа через `SELECT … FOR UPDATE`, вызывает шлюз только для `pending` и сохраняет `succeeded` или `failed` вместе с `processed_at` в UTC. Блокировка удерживается до завершения транзакции. Конкурентный вызов для того же платежа ждёт и затем возвращает сохранённый результат. Техническая ошибка приводит к откату транзакции и передаётся вызывающему коду.
 
@@ -235,7 +244,7 @@ curl -sS -H "X-API-Key: ${API_KEY}" \
 
 Задержки не включают обработку шлюзом, HTTP-запросы, ожидание очереди и доступности consumer. Если ошибка случилась при webhook, повтор использует сохранённый результат платежа и не вызывает шлюз заново. Бизнес-результат `failed` сам по себе не вызывает retry или DLQ.
 
-Обработчик использует функцию `is_retryable_processing_error` в `services/errors.py` для выбора retry или DLQ. Для повторной попытки подходят исключения HTTP-доставки, включая любой ответ вне `2xx` (в том числе `3xx` и `4xx`), ошибки соединения, операционные таймауты и превышение общего `WEBHOOK_REQUEST_DEADLINE`.
+Обработчик использует функцию `is_retryable_processing_error` в `messaging/errors.py` для выбора retry или DLQ. Для повторной попытки подходят исключения HTTP-доставки, включая любой ответ вне `2xx` (в том числе `3xx` и `4xx`), ошибки соединения, операционные таймауты и превышение общего `WEBHOOK_REQUEST_DEADLINE`.
 
 Для БД учитываются потеря соединения, исчерпание пула и SQLSTATE ошибок соединения, отката транзакции, нехватки ресурсов, недоступности блокировки и остановки сервера. Если SQLSTATE отсутствует, `OperationalError` и `InterfaceError` считаются повторяемыми; прочие неизвестные ошибки БД — нет. Известные ошибки ограничений, авторизации и SQL не повторяются.
 

@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.db.models import PaymentStatus
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 
 
 @pytest.mark.asyncio

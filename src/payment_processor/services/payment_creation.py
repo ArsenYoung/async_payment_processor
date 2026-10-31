@@ -4,9 +4,8 @@ from contextlib import AbstractAsyncContextManager
 from uuid import uuid4
 
 from payment_processor.application.errors import IdempotencyKeyViolationError
-from payment_processor.application.records import PaymentRecord
+from payment_processor.application.records import NewPayment, PaymentRecord
 from payment_processor.application.results import PaymentCreatedResult
-from payment_processor.db.models import Payment
 from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload
@@ -44,7 +43,7 @@ class CreatePaymentUseCase:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is not None:
                 return self._reuse(existing, command)
-            payment = Payment(
+            payment = NewPayment(
                 id=uuid4(),
                 amount=command.amount,
                 currency=command.currency,

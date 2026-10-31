@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
+from payment_processor.messaging.errors import is_retryable_processing_error
 from payment_processor.messaging.retry import RetryAttempt, RetryPolicy
-from payment_processor.services.errors import is_retryable_processing_error
 
 
 @dataclass(frozen=True)

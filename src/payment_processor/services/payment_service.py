@@ -11,17 +11,18 @@ from payment_processor.application.commands import (
     GetPaymentQuery,
     ProcessPaymentCommand,
 )
+from payment_processor.application.ports import (
+    PaymentGateway,
+    PaymentRepository,
+    WebhookSender,
+)
 from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
-from payment_processor.db.repositories.factories import payment_repository_scope
-from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.services.payment_creation import CreatePaymentUseCase
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.payment_lookup import GetPaymentUseCase
 from payment_processor.services.payment_processing import ProcessPaymentUseCase
-from payment_processor.services.ports import PaymentGateway, WebhookSender
 from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
 
 
@@ -30,18 +31,15 @@ class PaymentService:
 
     def __init__(
         self,
-        session_scope_factory: Callable[[], AbstractAsyncContextManager[Any]],
-        repository_factory: Callable[[Any], PaymentRepository] = PaymentRepository,
+        store_scope_factory: Callable[
+            [], AbstractAsyncContextManager[PaymentRepository]
+        ],
         *,
-        gateway: PaymentGateway | None = None,
+        gateway: PaymentGateway,
     ) -> None:
-        selected_gateway = gateway if gateway is not None else PaymentGatewaySimulator()
-        store_scope_factory = payment_repository_scope(
-            session_scope_factory, repository_factory
-        )
         self._create = CreatePaymentUseCase(store_scope_factory)
         self._get = GetPaymentUseCase(store_scope_factory)
-        self._process = ProcessPaymentUseCase(store_scope_factory, selected_gateway)
+        self._process = ProcessPaymentUseCase(store_scope_factory, gateway)
         self._deliver_webhook = DeliverPaymentWebhookUseCase(store_scope_factory)
 
     async def create_payment(

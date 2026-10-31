@@ -5,9 +5,9 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
-from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_get_payment_returns_saved_details_after_session_closes(
     status: PaymentStatus,
 ) -> None:
     saved_payment = await _save_payment(database, idempotency_key, status)
-    service = PaymentService(database.session_scope)
+    service = create_payment_service(database.session_scope)
 
     payment = await service.get_payment(saved_payment.id)
 
@@ -44,7 +44,7 @@ async def test_get_payment_returns_none_for_unknown_id_without_creating_records(
     saved_payment = await _save_payment(
         database, idempotency_key, PaymentStatus.PENDING
     )
-    service = PaymentService(database.session_scope)
+    service = create_payment_service(database.session_scope)
     payment_count = select(func.count()).select_from(Payment)
     outbox_count = select(func.count()).select_from(Outbox)
 

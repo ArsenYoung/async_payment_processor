@@ -13,6 +13,9 @@ from faststream.rabbit import RabbitBroker
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import settings
 from payment_processor.core.logging import (
@@ -26,10 +29,7 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.outbox_service import OutboxService, PublicationResult
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
+from payment_processor.services.outbox_service import PublicationResult
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +89,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests = 0
 
     async def respond(request: httpx.Request) -> httpx.Response:
@@ -101,7 +101,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
         timeout=1, transport=httpx.MockTransport(respond)
     ) as webhook:
         async with retry_consumer(service, webhook):
-            assert await OutboxService(
+            assert await create_outbox_service(
                 outbox_database.session_scope, RabbitEventPublisher(routing_broker)
             ).publish_batch(10) == PublicationResult(1, 0)
             await wait_for_log(caplog, "consume", "completed")
@@ -175,7 +175,7 @@ async def test_real_dlq_logs_exhaustion_and_preserves_event_context(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.side_effect = TimeoutError("private-gateway-error")
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     async with WebhookClient(timeout=1) as webhook:
         async with retry_consumer(service, webhook):
             await topology.publish_payment_event(routing_broker, retry_event)
@@ -214,7 +214,7 @@ async def test_real_invalid_messages_keep_safe_available_context(
     body: bytes | None,
     attempt: object,
 ) -> None:
-    service = PaymentService(outbox_database.session_scope)
+    service = create_payment_service(outbox_database.session_scope)
     async with WebhookClient(timeout=1) as webhook:
         async with retry_consumer(service, webhook):
             await routing_broker.publish(
@@ -247,7 +247,7 @@ async def test_real_outbox_retry_logs_only_saved_publication_attempts(
     exchange = await routing_broker.declare_exchange(topology.PAYMENTS_EXCHANGE)
     queue = await routing_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
     await queue.unbind(exchange, routing_key=topology.PAYMENTS_NEW_QUEUE.routing())
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(routing_broker)
     )
     try:
@@ -297,9 +297,9 @@ async def test_rollback_never_logs_a_saved_success(
 
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = PaymentStatus.SUCCEEDED
-    service = PaymentService(failing_commit, gateway=gateway)
+    service = create_payment_service(failing_commit, gateway=gateway)
     if operation == "webhook":
-        await PaymentService(
+        await create_payment_service(
             outbox_database.session_scope, gateway=gateway
         ).process_payment(retry_event.payload.payment_id)
     caplog.clear()
@@ -308,7 +308,7 @@ async def test_rollback_never_logs_a_saved_success(
     ) as webhook:
         with pytest.raises(RuntimeError):
             if operation == "outbox":
-                await OutboxService(
+                await create_outbox_service(
                     failing_commit, RabbitEventPublisher(routing_broker)
                 ).publish_batch(10)
             elif operation == "payment":

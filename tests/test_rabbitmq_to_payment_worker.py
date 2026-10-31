@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call
 
 import pytest
 
+from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.db.session import Database
 from payment_processor.rabbitmq_to_payment_worker import main as consumer_main
 from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(consumer_main, "declare_payment_topology", declare)
     monkeypatch.setattr(consumer_main, "declare_retry_topology", declare_retry)
     monkeypatch.setattr(consumer_main, "WebhookClient", webhook_factory)
-    monkeypatch.setattr(consumer_main, "PaymentService", service_factory)
+    monkeypatch.setattr(consumer_main, "create_payment_service", service_factory)
     monkeypatch.setattr(consumer_main, "register_payment_subscriber", register)
     operations = Mock()
     operations.attach_mock(database, "database")

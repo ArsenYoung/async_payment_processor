@@ -1,6 +1,5 @@
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +17,8 @@ from payment_processor.db.repositories.payments import (
 
 
 def payment_repository_scope(
-    session_scope_factory: Callable[[], Any],
-    repository_factory: Callable[[Any], PaymentRepository] = PaymentRepository,
+    session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+    repository_factory: Callable[[AsyncSession], PaymentRepository] = PaymentRepository,
 ) -> Callable[[], AbstractAsyncContextManager[PaymentRepository]]:
     @asynccontextmanager
     async def scope() -> AsyncIterator[PaymentRepository]:

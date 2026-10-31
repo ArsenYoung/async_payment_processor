@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
@@ -329,7 +330,9 @@ async def test_integrity_error_without_postgres_details_is_preserved(
     repository = Mock(spec=PaymentRepository)
     repository.find_by_idempotency_key = AsyncMock(side_effect=error)
     repository_factory = Mock(return_value=repository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
 
     with pytest.raises(IntegrityError) as caught:
         await client.post(
@@ -387,7 +390,7 @@ def _synchronize_payment_creation(
             raise
 
     override_payment_service(
-        PaymentService(tracked_session_scope, SynchronizedRepository)
+        create_payment_service(tracked_session_scope, SynchronizedRepository)
     )
     return tracking
 
@@ -427,7 +430,9 @@ def _miss_first_payment_lookup(
         repositories.append(repository)
         return repository
 
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
     return repositories
 
 
@@ -455,7 +460,9 @@ def _insert_invalid_outbox(
             pytest.fail("The database must reject this constraint violation")
 
     repository_factory = Mock(side_effect=InvalidOutboxRepository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
     return repository_factory
 
 
@@ -474,6 +481,8 @@ def _hide_existing_payment(
                 raise
 
     repository_factory = Mock(side_effect=UnfindablePaymentRepository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
 
     return repository_factory, errors

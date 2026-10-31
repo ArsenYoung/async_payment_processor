@@ -1,1 +1,0 @@
-from payment_processor.adapters.webhooks import WebhookClient as WebhookClient

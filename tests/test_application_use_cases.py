@@ -8,13 +8,15 @@ from uuid import uuid4
 import pytest
 
 from payment_processor.application.commands import CreatePaymentCommand
-from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.application.errors import (
+    IdempotencyKeyViolationError,
+    PaymentNotFoundError,
+)
 from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
-from payment_processor.db.models import PaymentCurrency, PaymentStatus
-from payment_processor.services.errors import PaymentNotFoundError
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 from payment_processor.services.payment_creation import (
     CreatePaymentUseCase,
     IdempotencyConflictError,

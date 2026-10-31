@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.db.session import Database
 from payment_processor.services.payment_service import PaymentService
@@ -19,7 +20,7 @@ api_key_header = APIKeyHeader(
 
 def get_payment_service(request: Request) -> PaymentService:
     database: Database = request.app.state.database
-    return PaymentService(
+    return create_payment_service(
         session_scope_factory=database.session_scope,
         gateway=request.app.state.payment_gateway,
     )

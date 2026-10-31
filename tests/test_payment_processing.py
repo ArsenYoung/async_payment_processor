@@ -12,11 +12,11 @@ from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
 
 
 @pytest_asyncio.fixture
@@ -42,7 +42,7 @@ async def test_processing_commits_gateway_result_before_returning(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     started_at = datetime.now(UTC)
 
     payment = await service.process_payment(pending_payment.id)
@@ -74,11 +74,13 @@ async def test_repeated_processing_preserves_completed_result(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    first = await PaymentService(
+    first = await create_payment_service(
         outbox_database.session_scope, gateway=gateway
     ).process_payment(pending_payment.id)
     repeated_gateway = AsyncMock(spec=PaymentGatewaySimulator)
-    service = PaymentService(outbox_database.session_scope, gateway=repeated_gateway)
+    service = create_payment_service(
+        outbox_database.session_scope, gateway=repeated_gateway
+    )
 
     repeated = await service.process_payment(pending_payment.id)
 
@@ -93,7 +95,7 @@ async def test_unknown_payment_raises_without_calling_gateway(
     outbox_database: Database,
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment_id = uuid4()
 
     with pytest.raises(LookupError, match=str(payment_id)):
@@ -128,9 +130,11 @@ async def test_concurrent_processing_waits_and_reuses_committed_result(
 
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.side_effect = process
-    first_service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    first_service = create_payment_service(
+        outbox_database.session_scope, gateway=gateway
+    )
     second_gateway = AsyncMock(spec=PaymentGatewaySimulator)
-    second_service = PaymentService(
+    second_service = create_payment_service(
         outbox_database.session_scope, WaitingRepository, gateway=second_gateway
     )
     tasks = [asyncio.create_task(first_service.process_payment(pending_payment.id))]
@@ -196,7 +200,7 @@ async def test_processing_failure_rolls_back_and_allows_retry(
             if failure == "commit":
                 await session.flush()
 
-    service = PaymentService(session_scope, gateway=gateway)
+    service = create_payment_service(session_scope, gateway=gateway)
     with pytest.raises(type(error)) as caught:
         await service.process_payment(pending_payment.id)
     assert caught.value is error
@@ -208,7 +212,7 @@ async def test_processing_failure_rolls_back_and_allows_retry(
         assert saved.processed_at is None
 
     gateway.process.side_effect = None
-    result = await PaymentService(
+    result = await create_payment_service(
         outbox_database.session_scope, gateway=gateway
     ).process_payment(pending_payment.id)
     assert result.status == PaymentStatus.SUCCEEDED

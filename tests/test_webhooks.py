@@ -9,14 +9,16 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from payment_processor.adapters.webhooks import (
+    WebhookClient,
+    WebhookRequestTimeoutError,
+)
 from payment_processor.application.results import PaymentDetailsResult
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import Settings
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging.schemas import PaymentResultPayload
-from payment_processor.services.errors import WebhookRequestTimeoutError
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.fixture
@@ -98,7 +100,7 @@ async def test_webhook_sends_saved_payment_result(
     expected_payload["status"] = status.value
     async with outbox_database.session_scope() as session:
         session.add(completed_payment)
-    payment = await PaymentService(outbox_database.session_scope).get_payment(
+    payment = await create_payment_service(outbox_database.session_scope).get_payment(
         completed_payment.id
     )
     assert payment is not None
