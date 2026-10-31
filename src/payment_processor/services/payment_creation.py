@@ -4,6 +4,7 @@ from contextlib import AbstractAsyncContextManager
 from uuid import uuid4
 
 from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.application.records import PaymentRecord
 from payment_processor.application.results import PaymentCreatedResult
 from payment_processor.db.models import Payment
 from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
@@ -38,7 +39,7 @@ class CreatePaymentUseCase:
             payment = await self._recover(command, error)
         return PaymentCreatedResult.from_payment(payment)
 
-    async def _create(self, command: CreatePaymentCommand) -> Payment:
+    async def _create(self, command: CreatePaymentCommand) -> PaymentRecord:
         async with self._store_scope_factory() as repository:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is not None:
@@ -57,14 +58,16 @@ class CreatePaymentUseCase:
 
     async def _recover(
         self, command: CreatePaymentCommand, error: IdempotencyKeyViolationError
-    ) -> Payment:
+    ) -> PaymentRecord:
         async with self._store_scope_factory() as repository:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is None:
                 raise error
             return self._reuse(existing, command)
 
-    def _reuse(self, payment: Payment, command: CreatePaymentCommand) -> Payment:
+    def _reuse(
+        self, payment: PaymentRecord, command: CreatePaymentCommand
+    ) -> PaymentRecord:
         if not matches_create_command(payment, command):
             raise IdempotencyConflictError
         return payment

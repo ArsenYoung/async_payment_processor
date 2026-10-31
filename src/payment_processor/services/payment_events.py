@@ -1,10 +1,10 @@
 from typing import Any
 
-from payment_processor.db.models import Payment
-from payment_processor.messaging.schemas import PaymentCreatedPayload
+from payment_processor.application.events import PaymentCreatedPayload
+from payment_processor.application.records import PaymentRecord
 
 
-def build_payment_created_payload(payment: Payment) -> dict[str, Any]:
+def build_payment_created_payload(payment: PaymentRecord) -> dict[str, Any]:
     return PaymentCreatedPayload.model_validate(
         {
             "payment_id": payment.id,

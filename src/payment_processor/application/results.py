@@ -7,7 +7,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
+from payment_processor.application.records import PaymentRecord
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 
 
 @dataclass(frozen=True)
@@ -17,7 +18,7 @@ class PaymentCreatedResult:
     created_at: datetime
 
     @classmethod
-    def from_payment(cls, payment: Payment) -> "PaymentCreatedResult":
+    def from_payment(cls, payment: PaymentRecord) -> "PaymentCreatedResult":
         return cls(payment.id, payment.status, payment.created_at)
 
 
@@ -36,7 +37,7 @@ class PaymentDetailsResult:
     webhook_delivered_at: datetime | None = None
 
     @classmethod
-    def from_payment(cls, payment: Payment) -> "PaymentDetailsResult":
+    def from_payment(cls, payment: PaymentRecord) -> "PaymentDetailsResult":
         return cls(
             payment_id=payment.id,
             amount=payment.amount,

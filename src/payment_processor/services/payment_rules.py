@@ -1,9 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
 
-from payment_processor.db.models import Payment, PaymentStatus
+from payment_processor.application.records import PaymentRecord
 from payment_processor.domain.payment import Payment as DomainPayment
-from payment_processor.domain.payment import PaymentStatus as DomainPaymentStatus
+from payment_processor.domain.payment import PaymentStatus
 from payment_processor.services.contracts import CreatePaymentCommand
 
 
@@ -26,7 +26,9 @@ def json_values_equal(left: object, right: object) -> bool:
     return type(left) is type(right) and left == right
 
 
-def matches_create_command(payment: Payment, command: CreatePaymentCommand) -> bool:
+def matches_create_command(
+    payment: PaymentRecord, command: CreatePaymentCommand
+) -> bool:
     return (
         payment.amount == command.amount
         and payment.currency == command.currency
@@ -37,15 +39,12 @@ def matches_create_command(payment: Payment, command: CreatePaymentCommand) -> b
 
 
 def is_completed(status: PaymentStatus, processed_at: datetime | None) -> bool:
-    domain_status = DomainPaymentStatus(status.value)
-    return DomainPayment(status=domain_status, processed_at=processed_at).is_completed
+    return DomainPayment(status=status, processed_at=processed_at).is_completed
 
 
 def can_process(status: PaymentStatus) -> bool:
-    return DomainPayment(status=DomainPaymentStatus(status.value)).can_process
+    return DomainPayment(status=status).can_process
 
 
-def can_deliver_webhook(
-    status: PaymentStatus, processed_at: datetime | None
-) -> bool:
+def can_deliver_webhook(status: PaymentStatus, processed_at: datetime | None) -> bool:
     return is_completed(status, processed_at)

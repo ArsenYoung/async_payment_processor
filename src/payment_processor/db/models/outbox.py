@@ -1,5 +1,4 @@
 from datetime import datetime
-from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,11 +17,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from payment_processor.application.events import OutboxEventType as OutboxEventType
 from payment_processor.db.models.base import Base, enum_values
-
-
-class OutboxEventType(StrEnum):
-    PAYMENT_CREATED = "payment.created"
 
 
 class Outbox(Base):
