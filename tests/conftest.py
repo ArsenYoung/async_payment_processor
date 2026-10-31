@@ -13,9 +13,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 from sqlalchemy.schema import CreateSchema, DropSchema
 
+from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.main import create_app
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.db.models import Outbox, Payment
 from payment_processor.db.models.base import Base
@@ -28,7 +30,6 @@ from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
 from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest_asyncio.fixture
@@ -105,7 +106,9 @@ async def routing_broker(
 async def retry_event(
     outbox_database: Database, payment_payload: dict
 ) -> PaymentCreatedEvent:
-    payment = await PaymentService(outbox_database.session_scope).create_payment(
+    payment = await create_payment_service(
+        outbox_database.session_scope
+    ).create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"retry-{uuid4()}"
     )
     async with outbox_database.session_scope() as session:

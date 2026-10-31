@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
@@ -14,8 +16,6 @@ from payment_processor.messaging.topology import (
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 async def run_consumer() -> None:
@@ -30,7 +30,7 @@ async def _consume() -> None:
             timeout=settings.webhook_timeout,
             request_deadline=settings.webhook_request_deadline,
         ) as webhook_client:
-            payment_service = PaymentService(database.session_scope)
+            payment_service = create_payment_service(database.session_scope)
             broker = create_broker(prefetch_count=settings.consumer_prefetch_count)
             try:
                 register_payment_subscriber(

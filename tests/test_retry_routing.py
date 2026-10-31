@@ -18,6 +18,7 @@ from faststream.rabbit.testing import PatchedMessage, build_message
 from pamqp.commands import Basic
 from sqlalchemy.exc import OperationalError
 
+from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.retry import (
@@ -32,7 +33,6 @@ from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
 from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.fixture(autouse=True)

@@ -4,9 +4,9 @@ from contextlib import AbstractAsyncContextManager
 from time import perf_counter
 from uuid import UUID
 
+from payment_processor.application.errors import PaymentNotFoundError
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
-from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.ports import PaymentGateway, PaymentProcessingStore
 
 logger = logging.getLogger(__name__)

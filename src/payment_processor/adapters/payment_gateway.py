@@ -2,13 +2,14 @@ import asyncio
 import random
 from collections.abc import Awaitable, Callable
 
+from payment_processor.application.ports import PaymentGateway
 from payment_processor.domain.payment import PaymentStatus
 
 RandomValue = Callable[[], float]
 Sleep = Callable[[float], Awaitable[None]]
 
 
-class PaymentGatewaySimulator:
+class PaymentGatewaySimulator(PaymentGateway):
     """Simulate an external payment gateway for the payment processor."""
 
     def __init__(

@@ -14,14 +14,15 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.outbox_service import OutboxService, PublicationResult
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.services.outbox_service import PublicationResult
 
 
 @pytest_asyncio.fixture
@@ -56,7 +57,7 @@ async def recovery_broker(
 async def recovery_events(
     outbox_database: Database, payment_payload: dict
 ) -> list[Outbox]:
-    service = PaymentService(outbox_database.session_scope)
+    service = create_payment_service(outbox_database.session_scope)
     request = PaymentCreateRequest.model_validate(payment_payload)
     for _ in range(3):
         await service.create_payment(request, f"test-recovery-{uuid4()}")
@@ -70,7 +71,7 @@ async def test_broker_failure_then_recovery_delivers_all_pending_events(
     recovery_broker: RabbitBroker,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(recovery_broker)
     )
     with monkeypatch.context() as patch:
@@ -112,7 +113,7 @@ async def test_new_publisher_connection_resumes_only_unpublished_events(
     try:
         await first_broker.connect()
         await topology.declare_payment_topology(first_broker)
-        service = OutboxService(
+        service = create_outbox_service(
             outbox_database.session_scope, RabbitEventPublisher(first_broker)
         )
         assert await service.publish_batch(1) == PublicationResult(1, 0)
@@ -153,10 +154,16 @@ async def test_restart_after_confirmed_publication_repeats_same_event_ids(
             if failure == "cancellation":
                 raise asyncio.CancelledError()
 
-    service = OutboxService(failing_scope, RabbitEventPublisher(recovery_broker))
-    expected_error = OperationalError if failure == "commit" else asyncio.CancelledError
-    with pytest.raises(expected_error):
+    service = create_outbox_service(
+        failing_scope, RabbitEventPublisher(recovery_broker)
+    )
+    expected_error = (
+        PersistenceUnavailableError if failure == "commit" else asyncio.CancelledError
+    )
+    with pytest.raises(expected_error) as caught:
         await service.publish_batch(10)
+    if failure == "commit":
+        assert caught.value.__cause__ is error
 
     await _assert_messages(recovery_broker, recovery_events)
     for record in await _read_events(outbox_database):
@@ -179,7 +186,9 @@ async def _publish_with_new_connection(database: Database, expected_count: int) 
     try:
         await broker.connect()
         await topology.declare_payment_topology(broker)
-        service = OutboxService(database.session_scope, RabbitEventPublisher(broker))
+        service = create_outbox_service(
+            database.session_scope, RabbitEventPublisher(broker)
+        )
         assert await service.publish_batch(10) == PublicationResult(expected_count, 0)
         assert await service.publish_batch(10) == PublicationResult(0, 0)
     finally:
@@ -219,7 +228,7 @@ async def test_operator_recovers_only_selected_event_with_same_identity(
         session.add_all(recovery_events)
         for record in recovery_events:
             record.payload = {**record.payload, "amount": "invalid"}
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(recovery_broker)
     )
     assert await service.publish_batch(10) == PublicationResult(0, 3)

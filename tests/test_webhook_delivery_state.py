@@ -10,14 +10,16 @@ import pytest_asyncio
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 
+from payment_processor.adapters.webhooks import (
+    WebhookClient,
+    WebhookRequestTimeoutError,
+)
 from payment_processor.application.results import PaymentDetailsResult
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
-from payment_processor.services.errors import WebhookRequestTimeoutError
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest_asyncio.fixture
@@ -265,8 +267,10 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
             waiter_started.set()
             return await super().find_by_id_for_update(payment_id)
 
-    first_service = PaymentService(outbox_database.session_scope)
-    second_service = PaymentService(outbox_database.session_scope, WaitingRepository)
+    first_service = create_payment_service(outbox_database.session_scope)
+    second_service = create_payment_service(
+        outbox_database.session_scope, WaitingRepository
+    )
     transport_handle = AsyncMock(side_effect=handle)
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(transport_handle)

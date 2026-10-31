@@ -7,15 +7,19 @@ from typing import Self
 
 import httpx
 
+from payment_processor.application.ports import WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
 from payment_processor.messaging.schemas import PaymentResultPayload
-from payment_processor.services.errors import WebhookRequestTimeoutError
 
 logger = logging.getLogger(__name__)
 
 
-class WebhookClient:
+class WebhookRequestTimeoutError(httpx.TimeoutException):
+    """The complete webhook request exceeded its configured deadline."""
+
+
+class WebhookClient(WebhookSender):
     def __init__(
         self,
         *,

@@ -11,15 +11,15 @@ from payment_processor.application.commands import (
     DeliverWebhookCommand,
     ProcessPaymentCommand,
 )
+from payment_processor.application.ports import WebhookSender
 from payment_processor.core.logging import processing_context, processing_fields
 from payment_processor.messaging import topology
-from payment_processor.messaging.retry import RetryPolicy, read_attempt
-from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.payment_event_failures import (
+from payment_processor.messaging.payment_event_failures import (
     classify_payment_event_failure,
 )
+from payment_processor.messaging.retry import RetryPolicy, read_attempt
+from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 def register_payment_subscriber(
     broker: RabbitBroker,
     payment_service: PaymentService,
-    webhook_client: WebhookClient,
+    webhook_client: WebhookSender,
     *,
     retry_policy: RetryPolicy,
 ) -> None:

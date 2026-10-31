@@ -2,9 +2,9 @@ import os
 from functools import partial
 from unittest.mock import patch
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.rabbitmq_to_payment_worker import main as consumer
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
 
 
 def main() -> None:
@@ -18,7 +18,9 @@ def main() -> None:
         random_value=lambda: 0.5,
     )
     with patch.object(
-        consumer, "PaymentService", partial(PaymentService, gateway=gateway)
+        consumer,
+        "create_payment_service",
+        partial(create_payment_service, gateway=gateway),
     ):
         consumer.main()
 

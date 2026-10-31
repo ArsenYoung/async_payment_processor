@@ -9,6 +9,12 @@ import pytest
 from faststream.rabbit import RabbitBroker
 from sqlalchemy import select
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.adapters.webhooks import (
+    WebhookClient,
+    WebhookRequestTimeoutError,
+)
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
@@ -17,10 +23,6 @@ from payment_processor.messaging.schemas import (
     PaymentCreatedEvent,
     PaymentResultPayload,
 )
-from payment_processor.services.errors import WebhookRequestTimeoutError
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.mark.asyncio
@@ -38,7 +40,7 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     call_times: list[float] = []
     initial = await service.get_payment(retry_event.payload.payment_id)

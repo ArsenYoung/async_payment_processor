@@ -16,11 +16,14 @@ from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.schemas.payment import PaymentCreateRequest
 from payment_processor.application.commands import (
     DeliverWebhookCommand,
     ProcessPaymentCommand,
 )
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
@@ -30,9 +33,7 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
 from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +58,9 @@ def payment_event(payment_payload: dict) -> PaymentCreatedEvent:
 async def saved_event(
     outbox_database: Database, payment_payload: dict
 ) -> PaymentCreatedEvent:
-    payment = await PaymentService(outbox_database.session_scope).create_payment(
+    payment = await create_payment_service(
+        outbox_database.session_scope
+    ).create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"consumer-{uuid4()}"
     )
     async with outbox_database.session_scope() as session:
@@ -165,7 +168,7 @@ async def test_event_commits_result_then_delivers_saved_data(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
 
     async def handle(request: httpx.Request) -> httpx.Response:
@@ -227,7 +230,7 @@ async def test_unknown_payment_does_not_call_gateway_or_webhook(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     webhook = Mock(spec=WebhookClient)
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     broker = create_broker()
     register_payment_subscriber(
         broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
@@ -253,7 +256,7 @@ async def test_gateway_error_leaves_payment_pending_without_webhook(
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.side_effect = error
     webhook = Mock(spec=WebhookClient)
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     broker = create_broker()
     register_payment_subscriber(
         broker, service, webhook, retry_policy=RetryPolicy(base_delay=0.01)
@@ -285,7 +288,7 @@ async def test_webhook_failure_preserves_committed_payment_result(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     error_type = {
         "http": httpx.HTTPStatusError,
         "connection": httpx.ConnectError,
@@ -324,7 +327,7 @@ async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     handle = AsyncMock(return_value=httpx.Response(204))
     broker = create_broker()
 
@@ -368,7 +371,7 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     error_type = {
         "http": httpx.HTTPStatusError,
@@ -458,7 +461,7 @@ async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
                 fail_delivery_commit = False
                 event.listen(session.sync_session, "before_commit", fail_commit)
 
-    service = PaymentService(session_scope, gateway=gateway)
+    service = create_payment_service(session_scope, gateway=gateway)
     handle = AsyncMock(return_value=httpx.Response(204))
     broker = create_broker()
 
@@ -516,7 +519,7 @@ async def test_delivery_of_unknown_payment_raises_before_sending(
     webhook = Mock(spec=WebhookClient)
 
     with pytest.raises(LookupError, match=str(payment_id)):
-        await PaymentService(outbox_database.session_scope).deliver_webhook(
+        await create_payment_service(outbox_database.session_scope).deliver_webhook(
             payment_id, webhook
         )
 
@@ -532,7 +535,7 @@ async def test_pending_payment_cannot_be_delivered(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
         with pytest.raises(ValidationError):
-            await PaymentService(outbox_database.session_scope).deliver_webhook(
+            await create_payment_service(outbox_database.session_scope).deliver_webhook(
                 saved_event.payload.payment_id, webhook
             )
 
@@ -560,7 +563,7 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
     monkeypatch.setattr(topology, "PAYMENTS_NEW_QUEUE", queue)
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     handle = AsyncMock(return_value=httpx.Response(200))
     broker = create_broker()
 

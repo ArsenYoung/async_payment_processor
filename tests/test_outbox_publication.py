@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.db.session import Database
@@ -22,8 +23,7 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.outbox_service import OutboxService, PublicationResult
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.services.outbox_service import PublicationResult
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def broker() -> Mock:
 async def outbox_events(
     outbox_database: Database, payment_payload: dict
 ) -> list[Outbox]:
-    service = PaymentService(outbox_database.session_scope)
+    service = create_payment_service(outbox_database.session_scope)
     request = PaymentCreateRequest.model_validate(payment_payload)
     for _ in range(3):
         await service.create_payment(request, f"test-publication-{uuid4()}")
@@ -77,7 +77,7 @@ async def publication_broker(
 async def test_empty_batch_does_not_publish(
     outbox_database: Database, broker: Mock
 ) -> None:
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(broker)
     )
 
@@ -90,7 +90,9 @@ async def test_empty_batch_does_not_publish(
 async def test_invalid_batch_limit_does_not_publish(
     outbox_database: Database, broker: Mock, limit: int
 ) -> None:
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     with pytest.raises(ValueError, match="must be positive"):
         await service.publish_batch(limit)
@@ -102,7 +104,9 @@ async def test_invalid_batch_limit_does_not_publish(
 async def test_only_selected_batch_is_published(
     outbox_database: Database, outbox_events: list[Outbox], broker: Mock
 ) -> None:
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     assert await service.publish_batch(2) == PublicationResult(published=2, failed=0)
 
@@ -119,7 +123,7 @@ async def test_confirmed_batch_reaches_rabbitmq_and_is_not_published_again(
     outbox_events: list[Outbox],
     publication_broker: RabbitBroker,
 ) -> None:
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(publication_broker)
     )
 
@@ -157,7 +161,9 @@ async def test_mixed_batch_saves_failure_and_retries_only_unpublished_event(
     error: Exception,
 ) -> None:
     broker.publish.side_effect = [Basic.Ack(), error, Basic.Ack()]
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     assert await service.publish_batch(10) == PublicationResult(published=2, failed=1)
 
@@ -199,7 +205,9 @@ async def test_unconfirmed_batch_remains_unpublished(
     confirmation: object,
 ) -> None:
     broker.publish.return_value = confirmation
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     assert await service.publish_batch(10) == PublicationResult(published=0, failed=3)
 
@@ -219,7 +227,9 @@ async def test_invalid_payload_is_recorded_without_blocking_other_events(
     async with outbox_database.session_scope() as session:
         session.add(invalid)
         invalid.payload = {**invalid.payload, "amount": "invalid"}
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     assert await service.publish_batch(10) == PublicationResult(published=2, failed=1)
 
@@ -242,7 +252,9 @@ async def test_stalled_publication_times_out_and_saves_diagnostic(
         await waiting.wait()
 
     broker.publish.side_effect = stalled
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
 
     async with asyncio.timeout(2):
         result = await service.publish_batch(10, timeout=0.01)
@@ -267,10 +279,12 @@ async def test_rows_stay_locked_while_another_publisher_waits_for_confirmation(
         return Basic.Ack()
 
     broker.publish.side_effect = delayed
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
     second_broker = Mock(spec=RabbitBroker)
     second_broker.publish = AsyncMock(return_value=Basic.Ack())
-    second_service = OutboxService(
+    second_service = create_outbox_service(
         outbox_database.session_scope, RabbitEventPublisher(second_broker)
     )
     task = asyncio.create_task(service.publish_batch(10))
@@ -305,7 +319,9 @@ async def test_cancellation_rolls_back_batch_and_releases_locks(
         return Basic.Ack()
 
     broker.publish.side_effect = cancel_second
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
     task = asyncio.create_task(service.publish_batch(10))
     try:
         async with asyncio.timeout(2):
@@ -359,7 +375,7 @@ async def test_database_error_propagates_and_rolls_back_entire_batch(
             Basic.Ack(),
             ConnectionError("Broker disconnected"),
         ]
-    service = OutboxService(
+    service = create_outbox_service(
         outbox_database.session_scope,
         RabbitEventPublisher(broker),
         repository_factory=FailingRepository,
@@ -400,7 +416,9 @@ async def test_full_invalid_batch_does_not_starve_valid_event(
         for record in outbox_events[:2]:
             value = "invalid" if invalid_kind == "amount" else str(uuid4())
             record.payload = {**record.payload, invalid_kind: value}
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
     assert await service.publish_batch(2) == PublicationResult(0, 2)
     broker.publish.assert_not_awaited()
     assert await service.publish_batch(2) == PublicationResult(1, 0)
@@ -427,7 +445,9 @@ async def test_broker_failure_defers_without_quarantine(
         for record in outbox_events:
             record.attempts = attempts
     broker.publish.side_effect = ConnectionError("Broker unavailable")
-    service = OutboxService(outbox_database.session_scope, RabbitEventPublisher(broker))
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
     before = datetime.now(UTC)
     assert await service.publish_batch(10) == PublicationResult(0, 3)
     after = datetime.now(UTC)

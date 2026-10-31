@@ -12,6 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
@@ -299,7 +301,7 @@ async def test_duplicate_key_error_is_preserved_if_payment_cannot_be_found(
         database, override_payment_service
     )
 
-    with pytest.raises(IntegrityError) as caught:
+    with pytest.raises(IdempotencyKeyViolationError) as caught:
         await client.post(
             "/api/v1/payments",
             headers=payment_headers,
@@ -308,10 +310,10 @@ async def test_duplicate_key_error_is_preserved_if_payment_cannot_be_found(
 
     assert repository_factory.call_count == 2
     assert len(errors) == 1
-    assert caught.value is errors[0]
-    assert getattr(caught.value.orig, "sqlstate", None) == "23505"
+    assert caught.value.__cause__ is errors[0]
+    assert getattr(errors[0].orig, "sqlstate", None) == "23505"
     assert (
-        getattr(caught.value.orig.__cause__, "constraint_name", None)
+        getattr(errors[0].orig.__cause__, "constraint_name", None)
         == "uq_payments_idempotency_key"
     )
 
@@ -328,7 +330,9 @@ async def test_integrity_error_without_postgres_details_is_preserved(
     repository = Mock(spec=PaymentRepository)
     repository.find_by_idempotency_key = AsyncMock(side_effect=error)
     repository_factory = Mock(return_value=repository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
 
     with pytest.raises(IntegrityError) as caught:
         await client.post(
@@ -386,7 +390,7 @@ def _synchronize_payment_creation(
             raise
 
     override_payment_service(
-        PaymentService(tracked_session_scope, SynchronizedRepository)
+        create_payment_service(tracked_session_scope, SynchronizedRepository)
     )
     return tracking
 
@@ -426,7 +430,9 @@ def _miss_first_payment_lookup(
         repositories.append(repository)
         return repository
 
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
     return repositories
 
 
@@ -454,7 +460,9 @@ def _insert_invalid_outbox(
             pytest.fail("The database must reject this constraint violation")
 
     repository_factory = Mock(side_effect=InvalidOutboxRepository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
     return repository_factory
 
 
@@ -473,6 +481,8 @@ def _hide_existing_payment(
                 raise
 
     repository_factory = Mock(side_effect=UnfindablePaymentRepository)
-    override_payment_service(PaymentService(database.session_scope, repository_factory))
+    override_payment_service(
+        create_payment_service(database.session_scope, repository_factory)
+    )
 
     return repository_factory, errors
