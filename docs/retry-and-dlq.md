@@ -77,5 +77,5 @@ docker compose exec -T rabbitmq rabbitmqctl list_queues -p / \
 
 Автоматического consumer или возврата сообщений из DLQ нет. Сначала устраните причину, проверьте статус платежа и отметку webhook; ручная повторная публикация требует отдельного решения. Повтор POST с прежним `Idempotency-Key` возвращает существующий платёж и не создаёт новое событие Outbox, поэтому не запускает доставку из DLQ заново.
 
-Автоматические проверки этого поведения находятся в `tests/test_retry_routing.py`, `tests/test_dead_letter_queue.py` и `tests/test_payment_retries.py`; сквозную проверку успешного получения webhook запускайте командой `RUN_E2E=1 poetry run pytest -q tests/e2e/test_payment_flow.py` из раздела [«Проверки качества»](#проверки-качества).
+Автоматические проверки этого поведения находятся в `tests/test_retry_routing.py`, `tests/test_dead_letter_queue.py` и `tests/test_payment_retries.py`; сквозную проверку успешного получения webhook запускайте командой `RUN_E2E=1 poetry run pytest -q tests/e2e/test_payment_flow.py` из раздела [«Проверки качества»](../README.md#локальная-разработка-и-проверки).
 
