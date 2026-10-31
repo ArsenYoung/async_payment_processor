@@ -80,7 +80,7 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
                         break
                     await asyncio.sleep(0.02)
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(idempotency_key=initial.payment_id)
     assert len(requests) == successful_attempt
     assert [message.headers.get(ATTEMPT_HEADER, 1) for message in deliveries] == list(
         range(1, successful_attempt + 1)

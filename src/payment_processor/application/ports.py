@@ -1,6 +1,6 @@
 from collections.abc import Awaitable, Sequence
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
@@ -10,7 +10,7 @@ from payment_processor.domain.payment import Payment, PaymentStatus
 
 
 class PaymentGateway(Protocol):
-    def process(self) -> Awaitable[PaymentStatus]: ...
+    def process(self, *, idempotency_key: UUID) -> Awaitable[PaymentStatus]: ...
 
 
 class WebhookSender(Protocol):
@@ -35,7 +35,22 @@ class PaymentCreationStore(PaymentReader, Protocol):
     async def save_with_outbox(self, payment: PaymentInput) -> Payment: ...
 
 
+LeaseOperation = Literal["processing", "webhook"]
+
+
 class PaymentProcessingStore(Protocol):
+    async def claim_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID, seconds: float
+    ) -> bool: ...
+
+    async def verify_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID
+    ) -> None: ...
+
+    async def release_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID
+    ) -> None: ...
+
     async def save(self, payment: Payment) -> None: ...
 
     async def find_by_id_for_update(self, payment_id: UUID) -> Payment | None: ...
@@ -50,6 +65,14 @@ class PaymentRepository(PaymentCreationStore, WebhookDeliveryStore, Protocol):
 
 
 class OutboxStore(Protocol):
+    async def claim_next(
+        self, token: UUID, seconds: float, *, exclude_ids: Sequence[UUID]
+    ) -> OutboxRecord | None: ...
+
+    async def lock_claimed(self, event_id: UUID, token: UUID) -> OutboxRecord: ...
+
+    async def release_claim(self, event_id: UUID, token: UUID) -> None: ...
+
     async def fetch_unpublished(self, limit: int) -> Sequence[OutboxRecord]: ...
 
     async def mark_published(self, event: OutboxRecord) -> None: ...

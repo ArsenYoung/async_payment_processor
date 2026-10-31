@@ -120,7 +120,9 @@ async def test_webhook_exhaustion_preserves_result_and_dead_letter_diagnostics(
                     topology.retry_queue(3).name: "expired",
                 }
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=retry_event.payload.payment_id
+    )
     assert len(requests) == 3
     assert [message.headers.get(ATTEMPT_HEADER, 1) for message in deliveries] == [
         1,
@@ -241,7 +243,9 @@ async def test_failed_transfer_recovers_original_without_repeating_gateway(
     assert all(
         message.message_id == str(retry_event.event_id) for message in deliveries
     )
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=retry_event.payload.payment_id
+    )
     assert len(requests) == (4 if attempt == 1 else 2)
     assert all(request.content == requests[0].content for request in requests)
     payment = await service.get_payment(retry_event.payload.payment_id)

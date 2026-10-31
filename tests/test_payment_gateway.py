@@ -73,3 +73,15 @@ def test_gateway_rejects_invalid_configuration(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         PaymentGatewaySimulator(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_idempotency_key_preserves_outcome_across_gateway_instances() -> None:
+    from uuid import uuid4
+
+    key = uuid4()
+    first = PaymentGatewaySimulator(sleep=AsyncMock())
+    restarted = PaymentGatewaySimulator(sleep=AsyncMock())
+    assert await first.process(idempotency_key=key) == await restarted.process(
+        idempotency_key=key
+    )

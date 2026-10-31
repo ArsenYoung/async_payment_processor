@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
@@ -7,6 +8,10 @@ from uuid import UUID
 from payment_processor.application.errors import PaymentNotFoundError
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.services.payment_leases import (
+    EXTERNAL_CALL_TIMEOUT,
+    payment_lease,
+)
 from payment_processor.services.ports import PaymentGateway, PaymentProcessingStore
 
 logger = logging.getLogger(__name__)
@@ -29,14 +34,25 @@ class ProcessPaymentUseCase:
             payment_id=str(payment_id), operation="payment_process"
         )
         try:
-            async with self._store_scope_factory() as repository:
-                payment = await repository.find_by_id_for_update(payment_id)
-                if payment is None:
-                    raise PaymentNotFoundError(payment_id)
+            async with payment_lease(
+                self._store_scope_factory,
+                payment_id,
+                "processing",
+                lambda payment: payment.can_process,
+            ) as (payment, token):
                 outcome = "already_processed"
-                if payment.can_process:
-                    payment.process(await self._gateway.process())
-                    await repository.save(payment)
+                if token is not None:
+                    async with asyncio.timeout(EXTERNAL_CALL_TIMEOUT):
+                        status = await self._gateway.process(idempotency_key=payment_id)
+                    async with self._store_scope_factory() as repository:
+                        await repository.verify_lease(payment_id, "processing", token)
+                        current = await repository.find_by_id_for_update(payment_id)
+                        if current is None:
+                            raise PaymentNotFoundError(payment_id)
+                        payment = current
+                        payment.process(status)
+                        await repository.save(payment)
+                        await repository.release_lease(payment_id, "processing", token)
                     outcome = "processed"
         except Exception as error:
             logger.warning(

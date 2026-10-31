@@ -82,3 +82,10 @@ class Outbox(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+    publication_token: Mapped[UUID | None] = mapped_column(
+        PostgreSQLUUID(as_uuid=True), nullable=True
+    )
+    publication_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

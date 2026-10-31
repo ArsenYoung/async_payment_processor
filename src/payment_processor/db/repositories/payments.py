@@ -1,9 +1,12 @@
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.application.errors import LeaseLostError
+from payment_processor.application.ports import LeaseOperation
 from payment_processor.application.ports import (
     PaymentRepository as PaymentRepositoryPort,
 )
@@ -18,6 +21,58 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self._event_payload: dict[str, object] | None = None
+
+    async def claim_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID, seconds: float
+    ) -> bool:
+        if seconds <= 0:
+            raise ValueError("Lease duration must be positive")
+        until = getattr(PaymentModel, f"{operation}_until")
+        claimed = await self.session.scalar(
+            update(PaymentModel)
+            .where(
+                PaymentModel.id == payment_id,
+                or_(until.is_(None), until <= func.clock_timestamp()),
+            )
+            .values(
+                {
+                    f"{operation}_token": token,
+                    f"{operation}_until": func.clock_timestamp()
+                    + timedelta(seconds=seconds),
+                }
+            )
+            .returning(PaymentModel.id)
+            .execution_options(synchronize_session=False)
+        )
+        return claimed is not None
+
+    async def verify_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID
+    ) -> None:
+        owner = getattr(PaymentModel, f"{operation}_token")
+        until = getattr(PaymentModel, f"{operation}_until")
+        claimed = await self.session.scalar(
+            select(PaymentModel.id)
+            .where(
+                PaymentModel.id == payment_id,
+                owner == token,
+                until > func.clock_timestamp(),
+            )
+            .with_for_update()
+        )
+        if claimed is None:
+            raise LeaseLostError(f"Payment {operation} lease was lost")
+
+    async def release_lease(
+        self, payment_id: UUID, operation: LeaseOperation, token: UUID
+    ) -> None:
+        owner = getattr(PaymentModel, f"{operation}_token")
+        await self.session.execute(
+            update(PaymentModel)
+            .where(PaymentModel.id == payment_id, owner == token)
+            .values({f"{operation}_token": None, f"{operation}_until": None})
+            .execution_options(synchronize_session=False)
+        )
 
     def set_event_payload(self, payload: dict[str, object]) -> None:
         self._event_payload = payload
