@@ -55,7 +55,9 @@ def register_payment_subscriber(
             else:
                 context.enter_context(processing_context(event_id=message_event_id))
             try:
-                attempt = read_attempt(message.headers)
+                attempt = read_attempt(
+                    message.headers, max_attempts=retry_policy.max_attempts
+                )
                 context.enter_context(processing_context(attempt=attempt))
                 event = PaymentCreatedEvent.model_validate_json(body)
                 context.enter_context(
@@ -103,6 +105,7 @@ def register_payment_subscriber(
                     error=error,
                     reason=reason,
                     retry=retry,
+                    max_attempts=retry_policy.max_attempts,
                 )
             else:
                 logger.info(

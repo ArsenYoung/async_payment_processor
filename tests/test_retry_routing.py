@@ -240,11 +240,14 @@ async def test_failed_publication_has_a_bounded_confirmation_wait(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["processing", "delivery"])
-@pytest.mark.parametrize("attempt", [1, 2, 3])
+@pytest.mark.parametrize(
+    "max_attempts,attempt", [(3, 1), (3, 2), (3, 3), (1, 1), (5, 4), (5, 5)]
+)
 async def test_subscriber_acks_only_after_confirmed_transfer(
     payment_event: PaymentCreatedEvent,
     monkeypatch: pytest.MonkeyPatch,
     stage: str,
+    max_attempts: int,
     attempt: int,
 ) -> None:
     service = Mock(spec=PaymentService)
@@ -257,7 +260,7 @@ async def test_subscriber_acks_only_after_confirmed_transfer(
         broker,
         service,
         Mock(spec=WebhookClient),
-        retry_policy=RetryPolicy(base_delay=0.1),
+        retry_policy=RetryPolicy(base_delay=0.1, max_attempts=max_attempts),
     )
     operations = []
 
@@ -285,9 +288,11 @@ async def test_subscriber_acks_only_after_confirmed_transfer(
     assert operations == ["confirmed", "ack"]
     nack.assert_not_awaited()
     assert transfer.await_args.kwargs["routing_key"] == (
-        f"payment.retry.{attempt + 1}" if attempt < 3 else "payment.dead"
+        f"payment.retry.{attempt + 1}" if attempt < max_attempts else "payment.dead"
     )
-    assert transfer.await_args.kwargs["headers"][ATTEMPT_HEADER] == min(attempt + 1, 3)
+    assert transfer.await_args.kwargs["headers"][ATTEMPT_HEADER] == min(
+        attempt + 1, max_attempts
+    )
     assert transfer.await_args.kwargs["headers"]["x-payment-failed-attempt"] == attempt
 
 
@@ -599,3 +604,33 @@ async def test_expired_retry_waits_for_main_route_to_be_restored(
         assert message.body == payment_message.body
         assert message.message_id == payment_message.message_id
         assert message.headers[ATTEMPT_HEADER] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_attempts", [1, 5])
+async def test_topology_declares_queues_for_configured_policy(
+    max_attempts: int,
+) -> None:
+    broker = Mock()
+    broker.declare_exchange = AsyncMock()
+    broker.declare_queue = AsyncMock()
+    await topology.declare_retry_topology(
+        broker, RetryPolicy(base_delay=1, max_attempts=max_attempts)
+    )
+    assert [call.args[0].name for call in broker.declare_queue.call_args_list] == [
+        *[f"payments.retry.{attempt}" for attempt in range(2, max_attempts + 1)],
+        "payments.dlq",
+    ]
+
+
+def test_custom_attempt_limit_is_used_for_headers_and_failure_diagnostics() -> None:
+    headers = {ATTEMPT_HEADER: 4}
+    assert read_attempt(headers, max_attempts=5) == 4
+    result = failure_headers(
+        headers,
+        attempt=4,
+        error=TimeoutError(),
+        reason="retryable_processing_error",
+        max_attempts=5,
+    )
+    assert "x-payment-invalid-attempt" not in result

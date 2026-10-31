@@ -104,3 +104,67 @@ def test_invalid_retry_environment_is_rejected(
         Settings(**settings_values)
 
     assert caught.value.errors()[0]["loc"] == ("retry_base_delay",)
+
+
+@pytest.mark.parametrize("max_attempts", [1, 2, 5])
+def test_configured_policy_controls_attempt_limit_and_backoff(
+    max_attempts: int,
+) -> None:
+    from payment_processor.application.retry import RetryPolicy
+
+    policy = RetryPolicy(
+        base_delay=0.25, max_attempts=max_attempts, backoff_multiplier=3
+    )
+    assert list(policy.retry_attempts) == list(range(2, max_attempts + 1))
+    for attempt in range(1, max_attempts):
+        retry = policy.next_retry(attempt)
+        assert retry is not None
+        assert retry.number == attempt + 1
+        assert retry.delay == 0.25 * 3 ** (attempt - 1)
+    assert policy.next_retry(max_attempts) is None
+    with pytest.raises(ValueError):
+        policy.next_retry(max_attempts + 1)
+
+
+@pytest.mark.parametrize("max_attempts", [0, -1, True, 2.5, "3", None])
+def test_policy_rejects_invalid_attempt_limit(max_attempts: object) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        RetryPolicy(base_delay=1, max_attempts=max_attempts)
+
+
+@pytest.mark.parametrize("multiplier", [0, 0.5, -1, True, float("inf"), float("nan")])
+def test_policy_rejects_invalid_backoff(multiplier: object) -> None:
+    with pytest.raises(ValueError):
+        RetryPolicy(base_delay=1, backoff_multiplier=multiplier)
+
+
+def test_policy_rejects_overflow_in_later_retry() -> None:
+    with pytest.raises(ValueError, match="positive finite delays"):
+        RetryPolicy(base_delay=1, max_attempts=5, backoff_multiplier=1e200)
+
+
+def test_retry_settings_read_limit_and_multiplier(
+    settings_values: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RETRY_MAX_ATTEMPTS", "5")
+    monkeypatch.setenv("RETRY_BACKOFF_MULTIPLIER", "3")
+    settings = Settings(**settings_values)
+    assert settings.retry_max_attempts == 5
+    assert settings.retry_backoff_multiplier == 3
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("RETRY_MAX_ATTEMPTS", "0"),
+        ("RETRY_MAX_ATTEMPTS", "2.5"),
+        ("RETRY_BACKOFF_MULTIPLIER", "0.5"),
+        ("RETRY_BACKOFF_MULTIPLIER", "inf"),
+    ],
+)
+def test_retry_settings_reject_invalid_configuration(
+    settings_values: dict, monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValidationError):
+        Settings(**settings_values)

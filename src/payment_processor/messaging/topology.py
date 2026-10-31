@@ -12,6 +12,7 @@ from faststream.rabbit import (
 from faststream.rabbit.message import RabbitMessage
 from pamqp.commands import Basic
 
+from payment_processor.application.retry import MAX_ATTEMPTS, RetryPolicy
 from payment_processor.core.logging import processing_fields
 from payment_processor.domain.events import OutboxEventType
 from payment_processor.messaging.retry import (
@@ -51,8 +52,8 @@ def dead_letter_exchange() -> RabbitExchange:
 
 
 def retry_queue(attempt: int) -> RabbitQueue:
-    if type(attempt) is not int or attempt not in (2, 3):
-        raise ValueError("Retry queue requires attempt 2 or 3")
+    if type(attempt) is not int or attempt < 2:
+        raise ValueError("Retry queue requires an integer attempt of at least 2")
     return RabbitQueue(
         f"{PAYMENTS_EXCHANGE.name}.retry.{attempt}",
         routing_key=f"payment.retry.{attempt}",
@@ -73,9 +74,11 @@ def dead_letter_queue() -> RabbitQueue:
     )
 
 
-async def declare_retry_topology(broker: RabbitBroker) -> None:
+async def declare_retry_topology(
+    broker: RabbitBroker, policy: RetryPolicy = RetryPolicy()
+) -> None:
     exchange = await broker.declare_exchange(retry_exchange())
-    for attempt in (2, 3):
+    for attempt in policy.retry_attempts:
         definition = retry_queue(attempt)
         queue = await broker.declare_queue(definition)
         await queue.bind(exchange, routing_key=definition.routing())
@@ -93,6 +96,7 @@ async def publish_failed_payment(
     error: Exception,
     reason: str,
     retry: RetryAttempt | None,
+    max_attempts: int = MAX_ATTEMPTS,
     timeout: float = 5.0,
 ) -> None:
     started = perf_counter()
@@ -103,6 +107,7 @@ async def publish_failed_payment(
         attempt=attempt,
         error=error,
         reason=reason,
+        max_attempts=max_attempts,
     )
     if retry is not None:
         headers[ATTEMPT_HEADER] = retry.number

@@ -1,29 +1,34 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from math import isfinite
 from typing import Any
 
 import httpx
 from sqlalchemy.exc import DBAPIError
 
-MAX_ATTEMPTS = 3
+from payment_processor.application.retry import (
+    MAX_ATTEMPTS as MAX_ATTEMPTS,
+    RetryAttempt as RetryAttempt,
+    RetryPolicy as RetryPolicy,
+    validate_attempt,
+)
+
 ATTEMPT_HEADER = "x-payment-attempt"
 
 
-def validate_attempt(attempt: int) -> int:
-    if type(attempt) is not int or not 1 <= attempt <= MAX_ATTEMPTS:
-        raise ValueError(f"Attempt must be an integer between 1 and {MAX_ATTEMPTS}")
-    return attempt
-
-
-def read_attempt(headers: Mapping[str, Any]) -> int:
+def read_attempt(
+    headers: Mapping[str, Any], *, max_attempts: int = MAX_ATTEMPTS
+) -> int:
     attempt = headers.get(ATTEMPT_HEADER, 1)
-    return validate_attempt(attempt)
+    return validate_attempt(attempt, max_attempts=max_attempts)
 
 
 def failure_headers(
-    headers: Mapping[str, Any], *, attempt: int, error: Exception, reason: str
+    headers: Mapping[str, Any],
+    *,
+    attempt: int,
+    error: Exception,
+    reason: str,
+    max_attempts: int = MAX_ATTEMPTS,
 ) -> dict[str, Any]:
     result = dict(headers)
     result.update(
@@ -37,7 +42,7 @@ def failure_headers(
     )
     if ATTEMPT_HEADER in headers:
         try:
-            read_attempt(headers)
+            read_attempt(headers, max_attempts=max_attempts)
         except ValueError:
             result["x-payment-invalid-attempt"] = headers[ATTEMPT_HEADER]
     result.pop("x-payment-error-http-status", None)
@@ -49,31 +54,3 @@ def failure_headers(
         if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isalnum():
             result["x-payment-error-sqlstate"] = sqlstate
     return result
-
-
-@dataclass(frozen=True)
-class RetryAttempt:
-    number: int
-    delay: float
-
-
-class RetryPolicy:
-    def __init__(self, *, base_delay: float) -> None:
-        if (
-            isinstance(base_delay, bool)
-            or not isinstance(base_delay, (int, float))
-            or not isfinite(base_delay)
-            or base_delay <= 0
-            or not isfinite(base_delay * 2)
-        ):
-            raise ValueError("Retry base delay must produce positive finite delays")
-        self._base_delay = base_delay
-
-    def next_retry(self, attempt: int) -> RetryAttempt | None:
-        validate_attempt(attempt)
-        if attempt == MAX_ATTEMPTS:
-            return None
-        return RetryAttempt(
-            number=attempt + 1,
-            delay=self._base_delay * 2 ** (attempt - 1),
-        )
