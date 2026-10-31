@@ -46,9 +46,10 @@ class ProcessPaymentUseCase:
                         status = await self._gateway.process(idempotency_key=payment_id)
                     async with self._store_scope_factory() as repository:
                         await repository.verify_lease(payment_id, "processing", token)
-                        payment = await repository.find_by_id_for_update(payment_id)
-                        if payment is None:
+                        current = await repository.find_by_id_for_update(payment_id)
+                        if current is None:
                             raise PaymentNotFoundError(payment_id)
+                        payment = current
                         payment.process(status)
                         await repository.save(payment)
                         await repository.release_lease(payment_id, "processing", token)

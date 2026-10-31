@@ -291,10 +291,10 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
                 await waiter_started.wait()
                 assert waiter_pid is not None
                 async with outbox_database.session_scope() as session:
-                    while not await session.scalar(
-                        select(func.pg_blocking_pids(waiter_pid))
-                    ):
-                        await asyncio.sleep(0.01)
+                    assert (
+                        await session.scalar(select(func.pg_blocking_pids(waiter_pid)))
+                        == []
+                    )
                     saved = await session.get(Payment, completed_payment.id)
                     assert saved is not None
                     assert saved.status == status
@@ -316,3 +316,111 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
         assert saved.processed_at == completed_payment.processed_at
         assert saved.created_at == completed_payment.created_at
         assert saved.webhook_delivered_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["http", "commit", "cancellation"])
+async def test_delivery_failure_releases_lease_and_repeats_same_snapshot(
+    outbox_database: Database, completed_payment: Payment, failure: str
+) -> None:
+    from contextlib import asynccontextmanager
+
+    error = (
+        asyncio.CancelledError() if failure == "cancellation" else RuntimeError(failure)
+    )
+    scopes = 0
+    sender = AsyncMock()
+    if failure != "commit":
+        sender.send.side_effect = error
+
+    def fail_commit(session: object) -> None:
+        raise error
+
+    @asynccontextmanager
+    async def scope():
+        nonlocal scopes
+        scopes += 1
+        async with outbox_database.session_scope() as session:
+            if failure == "commit" and scopes == 2:
+                event.listen(session.sync_session, "before_commit", fail_commit)
+            yield session
+
+    with pytest.raises(type(error)):
+        await create_payment_service(scope).deliver_webhook(
+            completed_payment.id, sender
+        )
+    snapshot = sender.send.await_args.args[0]
+    async with outbox_database.session_scope() as session:
+        saved = await session.get(Payment, completed_payment.id)
+        assert saved.webhook_delivered_at is None
+        assert saved.webhook_token is None
+        assert saved.webhook_until is None
+    sender.send.side_effect = None
+    await create_payment_service(outbox_database.session_scope).deliver_webhook(
+        completed_payment.id, sender
+    )
+    assert sender.send.await_count == 2
+    assert sender.send.await_args.args[0] == snapshot
+
+
+@pytest.mark.asyncio
+async def test_http_uses_snapshot_without_connection_or_row_lock(
+    outbox_database: Database, completed_payment: Payment
+) -> None:
+    snapshot = None
+
+    async def send(payment: PaymentDetailsResult) -> None:
+        nonlocal snapshot
+        snapshot = payment
+        assert outbox_database.engine.pool.checkedout() == 0
+        async with outbox_database.session_scope() as session:
+            saved = await session.scalar(
+                select(Payment)
+                .where(Payment.id == completed_payment.id)
+                .with_for_update(nowait=True)
+            )
+            saved.description = "Updated while HTTP was in progress"
+            saved.payment_metadata = {"changed": True}
+        assert payment.description == completed_payment.description
+        assert payment.metadata == completed_payment.payment_metadata
+
+    sender = AsyncMock()
+    sender.send.side_effect = send
+    await create_payment_service(outbox_database.session_scope).deliver_webhook(
+        completed_payment.id, sender
+    )
+    assert snapshot is not None
+    async with outbox_database.session_scope() as session:
+        saved = await session.get(Payment, completed_payment.id)
+        assert saved.description == "Updated while HTTP was in progress"
+        assert saved.payment_metadata == {"changed": True}
+        assert saved.webhook_delivered_at is not None
+
+
+@pytest.mark.asyncio
+async def test_webhook_lease_expiry_allows_restart_and_fences_old_owner(
+    outbox_database: Database, completed_payment: Payment
+) -> None:
+    from datetime import timedelta
+
+    from payment_processor.application.errors import LeaseLostError
+
+    old_token = uuid4()
+    async with outbox_database.session_scope() as session:
+        repository = PaymentRepository(session)
+        assert await repository.claim_lease(
+            completed_payment.id, "webhook", old_token, 60
+        )
+    async with outbox_database.session_scope() as session:
+        saved = await session.get(Payment, completed_payment.id)
+        saved.webhook_until = datetime.now(UTC) - timedelta(seconds=1)
+    sender = AsyncMock()
+    await create_payment_service(outbox_database.session_scope).deliver_webhook(
+        completed_payment.id, sender
+    )
+    sender.send.assert_awaited_once()
+    with pytest.raises(LeaseLostError):
+        async with outbox_database.session_scope() as session:
+            await PaymentRepository(session).verify_lease(
+                completed_payment.id, "webhook", old_token
+            )
