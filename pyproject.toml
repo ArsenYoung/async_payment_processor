@@ -49,3 +49,13 @@ warn_unused_ignores = true
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "unit: no external services; dependencies use fakes or mocks",
+    "integration: requires PostgreSQL and/or RabbitMQ",
+    "smoke: isolated Docker startup, migrations and persistence checks",
+    "e2e: complete payment flow through an isolated Docker stack",
+]

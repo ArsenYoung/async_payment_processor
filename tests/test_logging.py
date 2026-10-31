@@ -19,6 +19,8 @@ from payment_processor.messaging.broker import create_broker
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
 from payment_processor.rabbitmq_to_payment_worker import main as consumer_main
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def logging_state() -> Iterator[None]:

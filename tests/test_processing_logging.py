@@ -75,6 +75,7 @@ async def wait_for_log(
             await asyncio.sleep(0.01)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("successful_attempt", [1, 2, 3])
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
@@ -165,6 +166,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
     assert processing_fields() == {}
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_real_dlq_logs_exhaustion_and_preserves_event_context(
     outbox_database: Database,
@@ -201,6 +203,7 @@ async def test_real_dlq_logs_exhaustion_and_preserves_event_context(
         assert message.message_id == str(retry_event.event_id)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "body,attempt", [(b"{private-invalid-json", 3), (None, "private-invalid-attempt")]
@@ -237,6 +240,7 @@ async def test_real_invalid_messages_keep_safe_available_context(
     )
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_real_outbox_retry_logs_only_saved_publication_attempts(
     outbox_database: Database,
@@ -280,6 +284,7 @@ async def test_real_outbox_retry_logs_only_saved_publication_attempts(
     assert entries(caplog) == []
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["outbox", "payment", "webhook"])
 async def test_rollback_never_logs_a_saved_success(
@@ -333,6 +338,7 @@ async def test_rollback_never_logs_a_saved_success(
         )
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry", [RetryAttempt(2, 0.1), None])
 @pytest.mark.parametrize("confirmed", [True, False])
@@ -402,6 +408,7 @@ async def test_transfer_result_is_logged_after_broker_confirmation(
         assert result["exception"]["type"] == "RuntimeError"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_parallel_contexts_are_reset_after_failure_and_cancellation(
     caplog: pytest.LogCaptureFixture,
@@ -439,6 +446,7 @@ async def test_parallel_contexts_are_reset_after_failure_and_cancellation(
     assert processing_fields() == {}
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_worker_failure_logs_lifecycle_and_safe_traceback(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
@@ -457,6 +465,7 @@ async def test_worker_failure_logs_lifecycle_and_safe_traceback(
     assert captured[1]["exception"]["exceptions"][0]["type"] == "RuntimeError"
 
 
+@pytest.mark.unit
 def test_formatter_excludes_sensitive_processing_fields() -> None:
     record = logging.makeLogRecord(
         {

@@ -46,6 +46,7 @@ def settings_values(monkeypatch: pytest.MonkeyPatch) -> dict:
     }
 
 
+@pytest.mark.unit
 def test_outbox_settings_defaults(settings_values: dict) -> None:
     settings = Settings(**settings_values)
     assert settings.outbox_batch_size == 100
@@ -54,6 +55,7 @@ def test_outbox_settings_defaults(settings_values: dict) -> None:
     assert settings.consumer_prefetch_count == 5
 
 
+@pytest.mark.unit
 def test_outbox_settings_read_environment(
     settings_values: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -70,6 +72,7 @@ def test_outbox_settings_read_environment(
     assert settings.consumer_prefetch_count == 9
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -107,6 +110,7 @@ def publisher_loop(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return SimpleNamespace(service=service, pause=pause, operations=operations)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "result",
@@ -128,6 +132,7 @@ async def test_publisher_pauses_after_empty_successful_and_failed_batches(
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
@@ -160,6 +165,7 @@ async def test_temporary_database_failure_is_logged_and_retried_after_pause(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
@@ -271,6 +277,7 @@ def publisher_runtime(
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("shutdown_signal", [signal.SIGINT, signal.SIGTERM])
 async def test_publisher_stops_publisher_before_closing_broker_and_database(
@@ -307,6 +314,7 @@ async def test_publisher_stops_publisher_before_closing_broker_and_database(
     _assert_signal_cleanup(runtime.signals)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["database", "broker", "topology"])
 async def test_signal_during_startup_closes_opened_resources(
@@ -345,6 +353,7 @@ async def test_signal_during_startup_closes_opened_resources(
     _assert_signal_cleanup(runtime.signals)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stage",
@@ -395,6 +404,7 @@ async def test_publisher_failure_is_reported_and_resources_are_closed(
     _assert_signal_cleanup(runtime.signals)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_running_publisher_publishes_new_payment_automatically(
     outbox_database: Database,

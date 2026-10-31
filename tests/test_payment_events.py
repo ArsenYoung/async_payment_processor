@@ -23,6 +23,7 @@ def event_payload(payment_payload: dict) -> dict:
     return {"payment_id": str(uuid4()), **payment_payload}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("currency", ["RUB", "USD", "EUR"])
 def test_event_json_round_trip_preserves_payment_data(
     event_payload: dict, currency: str
@@ -61,6 +62,7 @@ def test_event_json_round_trip_preserves_payment_data(
     assert json.loads(serialized)["payload"] == event_payload
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -93,6 +95,7 @@ def test_invalid_event_payload_is_rejected(
     assert caught.value.errors()[0]["loc"][0] == field
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "field",
     ["payment_id", "amount", "currency", "description", "metadata", "webhook_url"],
@@ -106,6 +109,7 @@ def test_incomplete_event_payload_is_rejected(event_payload: dict, field: str) -
     assert caught.value.errors()[0]["loc"] == (field,)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -131,6 +135,7 @@ def test_invalid_event_envelope_is_rejected(
     assert caught.value.errors()[0]["loc"] == (field,)
 
 
+@pytest.mark.unit
 def test_legacy_outbox_payload_uses_persisted_event_identity(
     event_payload: dict,
 ) -> None:
@@ -152,6 +157,7 @@ def test_legacy_outbox_payload_uses_persisted_event_identity(
     assert outbox.payload == event_payload
 
 
+@pytest.mark.unit
 def test_outbox_with_mismatched_payment_id_is_rejected(event_payload: dict) -> None:
     outbox = Outbox(
         id=uuid4(),
@@ -164,6 +170,7 @@ def test_outbox_with_mismatched_payment_id_is_rejected(event_payload: dict) -> N
         PaymentCreatedEvent.from_outbox(outbox)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_saved_event_preserves_identity_across_idempotent_requests(
     database: Database,
@@ -202,6 +209,7 @@ async def test_saved_event_preserves_identity_across_idempotent_requests(
     assert PaymentCreatedEvent.model_validate_json(restored.model_dump_json()) == event
 
 
+@pytest.mark.unit
 def test_event_can_be_built_from_a_record_without_orm(event_payload: dict) -> None:
     record = SimpleNamespace(
         id=uuid4(),
@@ -219,6 +227,7 @@ def test_event_can_be_built_from_a_record_without_orm(event_payload: dict) -> No
     }
 
 
+@pytest.mark.unit
 def test_messaging_schemas_import_without_database_dependencies() -> None:
     result = subprocess.run(
         [

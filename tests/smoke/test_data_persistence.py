@@ -11,6 +11,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+pytestmark = pytest.mark.smoke
+
 ROOT = Path(__file__).resolve().parents[2]
 PUBLISHER = "outbox-to-rabbitmq-worker"
 CONSUMER = "rabbitmq-to-payment-worker"

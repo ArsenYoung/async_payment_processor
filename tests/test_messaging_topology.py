@@ -60,6 +60,7 @@ async def isolated_broker(
         await broker.stop()
 
 
+@pytest.mark.unit
 def test_payment_topology_defines_durable_direct_route() -> None:
     assert topology.PAYMENTS_EXCHANGE.name == "payments"
     assert topology.PAYMENTS_EXCHANGE.type == ExchangeType.DIRECT
@@ -72,6 +73,7 @@ def test_payment_topology_defines_durable_direct_route() -> None:
     assert topology.PAYMENTS_NEW_QUEUE.exclusive is False
 
 
+@pytest.mark.unit
 def test_consumer_broker_uses_prefetch_without_disabling_publisher_confirms(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -86,6 +88,7 @@ def test_consumer_broker_uses_prefetch_without_disabling_publisher_confirms(
     assert channel.publisher_confirms is True
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_payment_event_reaches_queue_with_persistent_delivery_and_stable_id(
     isolated_broker: RabbitBroker, payment_event: PaymentCreatedEvent
@@ -109,6 +112,7 @@ async def test_payment_event_reaches_queue_with_persistent_delivery_and_stable_i
     assert await queue.get(fail=False, timeout=5) is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_topology_can_be_declared_again_from_another_connection(
     isolated_broker: RabbitBroker, payment_event: PaymentCreatedEvent
@@ -129,6 +133,7 @@ async def test_topology_can_be_declared_again_from_another_connection(
     assert await queue.get(fail=False, timeout=5) is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unroutable_payment_event_raises_publish_error(
     isolated_broker: RabbitBroker, payment_event: PaymentCreatedEvent
@@ -143,6 +148,7 @@ async def test_unroutable_payment_event_raises_publish_error(
     assert await queue.get(fail=False, timeout=5) is None
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("confirmation", [None, Basic.Nack(), Basic.Reject()])
 async def test_missing_or_negative_confirmation_is_rejected(
@@ -155,6 +161,7 @@ async def test_missing_or_negative_confirmation_is_rejected(
         await publish_payment_event(broker, payment_event)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error",
@@ -176,6 +183,7 @@ async def test_publication_errors_propagate(
     assert caught.value is error
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_publication_wait_is_bounded(payment_event: PaymentCreatedEvent) -> None:
     waiting = asyncio.Event()

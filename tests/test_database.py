@@ -6,6 +6,8 @@ from sqlalchemy import select
 from payment_processor.db.models import Payment, PaymentCurrency
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 def payment_for_key(idempotency_key: str) -> Payment:
     return Payment(

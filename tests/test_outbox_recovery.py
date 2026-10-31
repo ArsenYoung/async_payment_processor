@@ -64,6 +64,7 @@ async def recovery_events(
     return await _read_events(outbox_database)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_broker_failure_then_recovery_delivers_all_pending_events(
     outbox_database: Database,
@@ -103,6 +104,7 @@ async def test_broker_failure_then_recovery_delivers_all_pending_events(
     await _assert_messages(recovery_broker, [])
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_new_publisher_connection_resumes_only_unpublished_events(
     outbox_database: Database,
@@ -131,6 +133,7 @@ async def test_new_publisher_connection_resumes_only_unpublished_events(
     assert all(record.last_error is None for record in records)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["commit", "cancellation"])
 async def test_restart_after_confirmed_publication_repeats_same_event_ids(
@@ -219,6 +222,7 @@ async def _read_events(database: Database) -> list[Outbox]:
         return list(result.all())
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_operator_recovers_only_selected_event_with_same_identity(
     outbox_database: Database,
@@ -251,6 +255,7 @@ async def test_operator_recovers_only_selected_event_with_same_identity(
     assert records[0].last_error is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload_kind", ["invalid", "wrong_payment", "stored_invalid"])
 async def test_invalid_repair_keeps_quarantine_and_original_payload(
@@ -280,6 +285,7 @@ async def test_invalid_repair_keeps_quarantine_and_original_payload(
     assert record.last_error == "Invalid amount"
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_recovery_rejects_missing_pending_and_published_events(
     outbox_database: Database,
@@ -299,6 +305,7 @@ async def test_recovery_rejects_missing_pending_and_published_events(
         await recover_event(outbox_database, recovery_events[0].id)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_concurrent_recovery_releases_event_only_once(
     outbox_database: Database,
@@ -320,6 +327,7 @@ async def test_concurrent_recovery_releases_event_only_once(
     assert sum(isinstance(result, ValueError) for result in results) == 1
 
 
+@pytest.mark.unit
 def test_recovery_cli_validates_json_before_connecting(tmp_path, monkeypatch):
     from payment_processor.operations import outbox_recovery
 

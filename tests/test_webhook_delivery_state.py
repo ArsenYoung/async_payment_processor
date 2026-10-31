@@ -21,6 +21,8 @@ from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 
+pytestmark = pytest.mark.integration
+
 
 @pytest_asyncio.fixture
 async def completed_payment(outbox_database: Database) -> Payment:

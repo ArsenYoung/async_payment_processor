@@ -24,6 +24,8 @@ from payment_processor.services.payment_lookup import GetPaymentUseCase
 from payment_processor.services.payment_processing import ProcessPaymentUseCase
 from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
 
+pytestmark = pytest.mark.unit
+
 
 def store_scope(repository: object) -> object:
     @asynccontextmanager
@@ -439,3 +441,99 @@ async def test_external_deadline_releases_lease(
     repository.release_lease.assert_awaited_once()
     repository.save.assert_not_awaited()
     repository.mark_webhook_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
+async def test_fake_store_supports_full_application_flow(
+    memory_payments, fake_gateway, fake_sender, status
+) -> None:
+    command = command_for(payment())
+    creator = CreatePaymentUseCase(memory_payments.scope)
+    created = await creator.create(command)
+    repeated = await creator.create(command)
+    assert repeated == created
+    assert len(memory_payments.payments) == len(memory_payments.events) == 1
+    assert memory_payments.events[0]["payment_id"] == str(created.payment_id)
+    fake_gateway.status = status
+    processor = ProcessPaymentUseCase(memory_payments.scope, fake_gateway)
+    processed = await processor.process(created.payment_id)
+    assert processed.status == status
+    assert await processor.process(created.payment_id) == processed
+    assert fake_gateway.calls == [created.payment_id]
+    delivery = DeliverPaymentWebhookUseCase(memory_payments.scope)
+    await delivery.deliver(created.payment_id, fake_sender)
+    await delivery.deliver(created.payment_id, fake_sender)
+    assert len(fake_sender.calls) == 1
+    assert fake_sender.calls[0] == processed
+    stored = await GetPaymentUseCase(memory_payments.scope).execute(created.payment_id)
+    assert stored.status == status
+    assert stored.webhook_delivered_at is not None
+    assert not memory_payments.leases
+    assert memory_payments.active_scopes == 0
+
+
+@pytest.mark.asyncio
+async def test_fake_store_rejects_conflict_without_creating_second_event(
+    memory_payments,
+) -> None:
+    from dataclasses import replace
+
+    command = command_for(payment())
+    creator = CreatePaymentUseCase(memory_payments.scope)
+    await creator.create(command)
+    with pytest.raises(IdempotencyConflictError):
+        await creator.create(replace(command, amount=Decimal("11")))
+    assert len(memory_payments.payments) == len(memory_payments.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_fake_store_rolls_back_payment_and_outbox_on_commit_failure(
+    memory_payments,
+) -> None:
+    memory_payments.fail_commit_at = 1
+    with pytest.raises(RuntimeError, match="commit failed"):
+        await CreatePaymentUseCase(memory_payments.scope).create(command_for(payment()))
+    assert not memory_payments.payments
+    assert not memory_payments.events
+    assert memory_payments.active_scopes == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stage", ["gateway", "processing_commit", "sender", "delivery_commit"]
+)
+async def test_fake_store_preserves_committed_state_and_allows_retry(
+    memory_payments, fake_gateway, fake_sender, stage
+) -> None:
+    created = await CreatePaymentUseCase(memory_payments.scope).create(
+        command_for(payment())
+    )
+    processor = ProcessPaymentUseCase(memory_payments.scope, fake_gateway)
+    delivery = DeliverPaymentWebhookUseCase(memory_payments.scope)
+    if stage in {"sender", "delivery_commit"}:
+        await processor.process(created.payment_id)
+    if stage == "gateway":
+        fake_gateway.error = RuntimeError("gateway unavailable")
+    elif stage == "sender":
+        fake_sender.error = RuntimeError("receiver unavailable")
+    else:
+        memory_payments.fail_commit_at = memory_payments.commits + 2
+    with pytest.raises(RuntimeError):
+        if stage in {"gateway", "processing_commit"}:
+            await processor.process(created.payment_id)
+        else:
+            await delivery.deliver(created.payment_id, fake_sender)
+    stored = memory_payments.payments[created.payment_id]
+    assert stored.status == (
+        PaymentStatus.PENDING
+        if stage in {"gateway", "processing_commit"}
+        else PaymentStatus.SUCCEEDED
+    )
+    assert stored.webhook_delivered_at is None
+    assert not memory_payments.leases
+    memory_payments.fail_commit_at = None
+    fake_gateway.error = fake_sender.error = None
+    await processor.process(created.payment_id)
+    await delivery.deliver(created.payment_id, fake_sender)
+    assert memory_payments.payments[created.payment_id].webhook_delivered_at is not None

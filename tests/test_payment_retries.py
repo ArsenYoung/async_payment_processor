@@ -24,6 +24,8 @@ from payment_processor.messaging.schemas import (
     PaymentResultPayload,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])

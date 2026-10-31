@@ -649,7 +649,41 @@ poetry run ruff format --check .
 poetry run mypy
 ```
 
-Запустить набор тестов без включения Docker E2E и smoke:
+У каждого теста ровно одна марка уровня: `unit`, `integration`, `smoke` или `e2e`.
+Незарегистрированные марки и отсутствие либо пересечение уровней отклоняются при сборе тестов.
+
+| Уровень | Команда | Зависимости |
+| --- | --- | --- |
+| Application unit | `poetry run pytest -q tests/unit` | Python-зависимости проекта; без `.env`, PostgreSQL, RabbitMQ и Docker |
+| Все unit | `poetry run pytest -q -m unit` | Python-зависимости и настройки для импорта старых смешанных модулей; внешние сервисы не нужны |
+| Integration | `poetry run pytest -q -m integration` | Настроенные PostgreSQL/RabbitMQ и применённые миграции |
+| Smoke | `RUN_DOCKER_SMOKE=1 poetry run pytest -q -m smoke` | Docker Engine, Compose и возможность собрать образ |
+| E2E | `RUN_E2E=1 poetry run pytest -q -m e2e` | Docker Engine, Compose и возможность собрать образ |
+| Полный набор | `RUN_DOCKER_SMOKE=1 RUN_E2E=1 poetry run pytest -q` | PostgreSQL/RabbitMQ с миграциями для integration и Docker для smoke/e2e |
+
+Application unit проверяет use case'ы через fake-порты с in-memory состоянием и rollback,
+а также сохраняет точечные mock-проверки ошибок. Fake-хранилище предназначено для последовательных
+сценариев; конкурентность, блокировки и реальные транзакции проверяются с PostgreSQL.
+Смешанные модули размечены на уровне отдельных тестов: `-m unit` не запускает их
+интеграционные fixtures, но pytest импортирует модули до фильтрации по маркам.
+Для их сбора задайте `DATABASE_URL`, `RABBITMQ_URL`, `API_KEY` через окружение или `.env`;
+для unit допустимы тестовые адреса недоступных сервисов. Smoke/e2e поднимают собственные
+окружения и по умолчанию пропускаются без соответствующих `RUN_*` флагов.
+
+Контракты репозитория в `tests/test_repository_contracts.py` выполняют одинаковые сценарии
+для in-memory fake и SQLAlchemy: явное сохранение, rollback и владение lease.
+`tests/test_publisher_contracts.py` проверяет application-порт publisher, включая ACK,
+таймаут и фактическую persistent-доставку в RabbitMQ; `tests/test_webhook_contracts.py`
+проверяет application snapshot, общий deadline и отмену HTTP-запроса через MockTransport.
+Дополнительные проверки HTTP-ответов и сетевых ошибок остаются в `tests/test_webhooks.py`.
+
+```bash
+poetry run pytest -q tests/test_repository_contracts.py tests/test_publisher_contracts.py tests/test_webhook_contracts.py
+```
+
+Запустить unit и integration без включения Docker E2E и smoke:
+
+
 
 ```bash
 poetry run pytest -q

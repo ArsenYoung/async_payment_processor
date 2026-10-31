@@ -3,6 +3,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("package", ["application", "services"])
 def test_application_contracts_import_without_frameworks_or_adapters(

@@ -19,6 +19,8 @@ from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.services.payment_service import PaymentService
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_repeated_request_returns_same_payment(

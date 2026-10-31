@@ -12,6 +12,8 @@ from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["processing", "webhook"])

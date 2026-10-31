@@ -29,6 +29,7 @@ def make_payment(status: PaymentStatus = PaymentStatus.PENDING) -> Payment:
     )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("status", list(PaymentStatus))
 def test_mapping_preserves_all_payment_fields(status: PaymentStatus) -> None:
     payment = make_payment(status)
@@ -42,6 +43,7 @@ def test_mapping_preserves_all_payment_fields(status: PaymentStatus) -> None:
     assert restored is not payment
 
 
+@pytest.mark.unit
 def test_metadata_does_not_share_nested_values_between_layers() -> None:
     payment = make_payment()
     model = to_model(payment)
@@ -55,6 +57,7 @@ def test_metadata_does_not_share_nested_values_between_layers() -> None:
     assert restored.payment_metadata == {"items": [{"quantity": 3}]}
 
 
+@pytest.mark.unit
 def test_mapping_rejects_updating_another_payment() -> None:
     payment = make_payment()
     model = to_model(payment)
@@ -65,6 +68,7 @@ def test_mapping_rejects_updating_another_payment() -> None:
     assert to_domain(model) == payment
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_repository_requires_explicit_save_for_domain_changes(
     outbox_database: Database,

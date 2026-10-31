@@ -10,6 +10,8 @@ from uuid import uuid4
 import httpx
 import pytest
 
+pytestmark = pytest.mark.smoke
+
 ROOT = Path(__file__).resolve().parents[2]
 WORKERS = {
     "outbox-to-rabbitmq-worker": "outbox-to-rabbitmq-worker",
