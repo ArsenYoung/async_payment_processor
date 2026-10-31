@@ -78,6 +78,7 @@ async def test_webhook_posts_result_and_reuses_client(
     for request in requests:
         assert request.method == "POST"
         assert str(request.url) == completed_payment.webhook_url
+        assert request.headers["x-webhook-delivery-id"] == str(completed_payment.id)
         assert request.headers["content-type"] == "application/json"
         assert json.loads(request.content) == expected_payload
         assert request.extensions["timeout"] == {
@@ -338,3 +339,61 @@ def test_webhook_request_deadline_default_and_environment(
     assert Settings(**values).webhook_request_deadline == 5.0
     monkeypatch.setenv("WEBHOOK_REQUEST_DEADLINE", "2.5")
     assert Settings(**values).webhook_request_deadline == 2.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["response_lost", "server_error"])
+async def test_delivery_id_survives_retry_with_new_client_and_receiver_deduplicates(
+    completed_payment: Payment, expected_payload: dict, failure: str
+) -> None:
+    requests: list[httpx.Request] = []
+    accepted: set[str] = set()
+    effects: list[dict] = []
+
+    def receive(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        delivery_id = request.headers["x-webhook-delivery-id"]
+        if delivery_id not in accepted:
+            accepted.add(delivery_id)
+            effects.append(json.loads(request.content))
+        if len(requests) == 1:
+            if failure == "response_lost":
+                raise httpx.ReadTimeout("Receiver accepted but response was lost")
+            return httpx.Response(503)
+        return httpx.Response(204)
+
+    snapshot = PaymentDetailsResult.from_payment(completed_payment)
+    error = httpx.ReadTimeout if failure == "response_lost" else httpx.HTTPStatusError
+    async with WebhookClient(
+        timeout=1, transport=httpx.MockTransport(receive)
+    ) as client:
+        with pytest.raises(error):
+            await client.send(snapshot)
+    async with WebhookClient(
+        timeout=1, transport=httpx.MockTransport(receive)
+    ) as restarted_client:
+        await restarted_client.send(snapshot)
+    assert len(requests) == 2
+    assert accepted == {str(completed_payment.id)}
+    assert effects == [expected_payload]
+    assert requests[0].content == requests[1].content
+
+
+@pytest.mark.asyncio
+async def test_different_payments_have_distinct_delivery_ids(
+    completed_payment: Payment,
+) -> None:
+    delivery_ids: list[str] = []
+
+    def receive(request: httpx.Request) -> httpx.Response:
+        delivery_ids.append(request.headers["x-webhook-delivery-id"])
+        return httpx.Response(204)
+
+    async with WebhookClient(
+        timeout=1, transport=httpx.MockTransport(receive)
+    ) as client:
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
+        completed_payment.id = uuid4()
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
+    assert len(set(delivery_ids)) == 2
+    assert delivery_ids[1] == str(completed_payment.id)

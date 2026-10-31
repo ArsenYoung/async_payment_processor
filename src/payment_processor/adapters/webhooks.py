@@ -13,6 +13,7 @@ from payment_processor.core.logging import processing_fields
 from payment_processor.messaging.schemas import PaymentResultPayload
 
 logger = logging.getLogger(__name__)
+WEBHOOK_DELIVERY_ID_HEADER = "X-Webhook-Delivery-Id"
 
 
 class WebhookRequestTimeoutError(httpx.TimeoutException):
@@ -63,6 +64,7 @@ class WebhookClient(WebhookSender):
                         "POST",
                         payment.webhook_url,
                         json=payload.model_dump(mode="json"),
+                        headers={WEBHOOK_DELIVERY_ID_HEADER: str(payment.payment_id)},
                     ) as response:
                         fields["status_code"] = response.status_code
                         response.raise_for_status()

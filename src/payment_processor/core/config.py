@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     webhook_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     webhook_request_deadline: float = Field(default=5.0, gt=0, allow_inf_nan=False)
     retry_base_delay: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    retry_max_attempts: int = Field(default=3, ge=1)
+    retry_backoff_multiplier: float = Field(default=2.0, ge=1, allow_inf_nan=False)
     consumer_prefetch_count: int = Field(default=5, gt=0)
 
     model_config = SettingsConfigDict(

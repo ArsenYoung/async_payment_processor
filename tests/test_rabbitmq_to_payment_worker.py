@@ -101,7 +101,9 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
         ),
         call.broker.connect(),
         call.declare(runtime.broker),
-        call.declare_retry(runtime.broker),
+        call.declare_retry(
+            runtime.broker, runtime.register.call_args.kwargs["retry_policy"]
+        ),
         call.broker.start(),
         call.broker.stop(),
         call.webhook.__aexit__(
@@ -112,6 +114,8 @@ async def test_consumer_starts_subscribers_without_reading_or_publishing_outbox(
         call.database.dispose(),
     ]
     policy = runtime.register.call_args.kwargs["retry_policy"]
+    assert policy.max_attempts == consumer_main.settings.retry_max_attempts
+    assert policy.backoff_multiplier == consumer_main.settings.retry_backoff_multiplier
     assert policy.next_retry(1).delay == consumer_main.settings.retry_base_delay
     runtime.webhook_factory.assert_called_once_with(
         timeout=consumer_main.settings.webhook_timeout,

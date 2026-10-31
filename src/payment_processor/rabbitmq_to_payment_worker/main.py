@@ -33,16 +33,21 @@ async def _consume() -> None:
             payment_service = create_payment_service(database.session_scope)
             broker = create_broker(prefetch_count=settings.consumer_prefetch_count)
             try:
+                retry_policy = RetryPolicy(
+                    base_delay=settings.retry_base_delay,
+                    max_attempts=settings.retry_max_attempts,
+                    backoff_multiplier=settings.retry_backoff_multiplier,
+                )
                 register_payment_subscriber(
                     broker,
                     payment_service,
                     webhook_client,
-                    retry_policy=RetryPolicy(base_delay=settings.retry_base_delay),
+                    retry_policy=retry_policy,
                 )
                 await broker.connect()
                 configure_library_logging()
                 await declare_payment_topology(broker)
-                await declare_retry_topology(broker)
+                await declare_retry_topology(broker, retry_policy)
                 await broker.start()
                 logging.getLogger(__name__).info(
                     "Payment consumer ready", extra={"outcome": "ready"}
