@@ -2,8 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from payment_processor.db.models import Payment, PaymentStatus
-from payment_processor.domain.payment import Payment as DomainPayment
-from payment_processor.domain.payment import PaymentStatus as DomainPaymentStatus
+from payment_processor.domain.payment import can_process as can_process
+from payment_processor.domain.payment import is_completed as is_completed
 from payment_processor.services.contracts import CreatePaymentCommand
 
 
@@ -36,16 +36,5 @@ def matches_create_command(payment: Payment, command: CreatePaymentCommand) -> b
     )
 
 
-def is_completed(status: PaymentStatus, processed_at: datetime | None) -> bool:
-    domain_status = DomainPaymentStatus(status.value)
-    return DomainPayment(status=domain_status, processed_at=processed_at).is_completed
-
-
-def can_process(status: PaymentStatus) -> bool:
-    return DomainPayment(status=DomainPaymentStatus(status.value)).can_process
-
-
-def can_deliver_webhook(
-    status: PaymentStatus, processed_at: datetime | None
-) -> bool:
+def can_deliver_webhook(status: PaymentStatus, processed_at: datetime | None) -> bool:
     return is_completed(status, processed_at)

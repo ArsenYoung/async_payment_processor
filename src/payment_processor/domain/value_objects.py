@@ -9,7 +9,7 @@ class Money:
     currency: str
 
     def __post_init__(self) -> None:
-        if self.amount <= 0:
+        if not self.amount.is_finite() or self.amount <= 0:
             raise ValueError("Money amount must be positive")
         if not self.currency:
             raise ValueError("Money currency is required")

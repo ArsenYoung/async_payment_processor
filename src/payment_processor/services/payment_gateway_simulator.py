@@ -2,7 +2,7 @@ import asyncio
 import random
 from collections.abc import Awaitable, Callable
 
-from payment_processor.db.models import PaymentStatus
+from payment_processor.domain.payment import PaymentStatus
 
 RandomValue = Callable[[], float]
 Sleep = Callable[[float], Awaitable[None]]

@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -18,18 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from payment_processor.db.models.base import Base, enum_values
-
-
-class PaymentCurrency(StrEnum):
-    RUB = "RUB"
-    USD = "USD"
-    EUR = "EUR"
-
-
-class PaymentStatus(StrEnum):
-    PENDING = "pending"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 
 
 class Payment(Base):

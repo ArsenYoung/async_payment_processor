@@ -10,7 +10,7 @@ from payment_processor.api.schemas.validation import (
     validate_database_text,
     validate_json_value,
 )
-from payment_processor.db.models.payment import PaymentCurrency, PaymentStatus
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 
 
 class PaymentCreateRequest(BaseModel):
