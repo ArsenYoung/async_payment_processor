@@ -140,7 +140,7 @@ async def test_missing_payment_has_explicit_non_retryable_error(
 async def test_failed_gateway_outcome_is_saved_and_delivered(
     outbox_database: Database, payment_payload: dict
 ) -> None:
-    gateway = PaymentGatewaySimulator(random_value=lambda: 1.0, sleep=AsyncMock())
+    gateway = PaymentGatewaySimulator(success_rate=0.0, sleep=AsyncMock())
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
@@ -190,7 +190,7 @@ async def test_retryable_gateway_error_preserves_pending_payment(
 
     assert caught.value is error
     assert is_retryable_processing_error(caught.value)
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(idempotency_key=payment.payment_id)
     async with outbox_database.session_scope() as session:
         saved = await session.get(Payment, payment.payment_id)
         assert saved is not None

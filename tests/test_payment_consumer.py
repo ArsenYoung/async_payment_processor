@@ -210,7 +210,9 @@ async def test_event_commits_result_then_delivers_saved_data(
         async with RabbitTestBroker(broker):
             await _publish(broker, body)
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     assert len(requests) == 1
     async with outbox_database.session_scope() as session:
         payment = await session.get(Payment, saved_event.payload.payment_id)
@@ -311,7 +313,9 @@ async def test_webhook_failure_preserves_committed_payment_result(
             assert isinstance(routed_failure.await_args.kwargs["error"], error_type)
             assert routed_failure.await_args.kwargs["retry"].number == 2
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     async with outbox_database.session_scope() as session:
         payment = await session.get(Payment, saved_event.payload.payment_id)
         assert payment is not None
@@ -348,7 +352,9 @@ async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
 
             await _publish(broker, saved_event)
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     handle.assert_awaited_once()
     async with outbox_database.session_scope() as session:
         repeated = await session.get(Payment, saved_event.payload.payment_id)
@@ -419,7 +425,9 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
 
             await _publish(broker, saved_event)
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     assert len(requests) == 2
     assert requests[0].url == requests[1].url
     assert requests[0].content == requests[1].content
@@ -497,7 +505,9 @@ async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
 
             await _publish(broker, saved_event)
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     assert handle.await_count == 2
     first_request = handle.await_args_list[0].args[0]
     repeated_request = handle.await_args_list[1].args[0]
@@ -601,5 +611,7 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
         finally:
             await broker.stop()
 
-    gateway.process.assert_awaited_once_with()
+    gateway.process.assert_awaited_once_with(
+        idempotency_key=saved_event.payload.payment_id
+    )
     handle.assert_awaited_once()

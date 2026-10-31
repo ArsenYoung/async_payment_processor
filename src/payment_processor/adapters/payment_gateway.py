@@ -1,6 +1,8 @@
 import asyncio
 import random
 from collections.abc import Awaitable, Callable
+from hashlib import sha256
+from uuid import UUID
 
 from payment_processor.application.ports import PaymentGateway
 from payment_processor.domain.payment import PaymentStatus
@@ -32,7 +34,7 @@ class PaymentGatewaySimulator(PaymentGateway):
         self._random_value = random_value
         self._sleep = sleep
 
-    async def process(self) -> PaymentStatus:
+    async def process(self, *, idempotency_key: UUID | None = None) -> PaymentStatus:
         delay_random_value = self._random_value()
         if not 0 <= delay_random_value <= 1:
             raise ValueError("Random value must be between 0 and 1")
@@ -42,7 +44,11 @@ class PaymentGatewaySimulator(PaymentGateway):
         )
         await self._sleep(delay)
 
-        outcome_random_value = self._random_value()
+        outcome_random_value = (
+            self._random_value()
+            if idempotency_key is None
+            else int.from_bytes(sha256(idempotency_key.bytes).digest(), "big") / 2**256
+        )
         if not 0 <= outcome_random_value <= 1:
             raise ValueError("Random value must be between 0 and 1")
 
