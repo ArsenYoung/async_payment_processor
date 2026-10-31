@@ -5,12 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from payment_processor.application.records import PaymentRecord
+from payment_processor.application.ports import (
+    PaymentRepository as PaymentRepositoryPort,
+)
+from payment_processor.application.records import PaymentInput, PaymentRecord
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.services.payment_rules import can_deliver_webhook
 
 
-class PaymentRepository:
+class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self._event_payload: dict[str, object] | None = None
@@ -40,9 +43,19 @@ class PaymentRepository:
             payment.webhook_delivered_at = datetime.now(UTC)
             await self.session.flush()
 
-    async def save_with_outbox(self, payment: PaymentRecord) -> PaymentRecord:
+    async def save_with_outbox(self, payment: PaymentInput) -> PaymentRecord:
         if self._event_payload is None:
             raise ValueError("Event payload is required")
+        if not isinstance(payment, Payment):
+            payment = Payment(
+                id=payment.id,
+                amount=payment.amount,
+                currency=payment.currency,
+                description=payment.description,
+                payment_metadata=payment.payment_metadata,
+                idempotency_key=payment.idempotency_key,
+                webhook_url=payment.webhook_url,
+            )
         self.session.add(payment)
         await self.session.flush()
         await self.session.refresh(payment)
@@ -54,6 +67,9 @@ class PaymentRepository:
             )
         )
         return payment
+
+
+PaymentRepository = SqlAlchemyPaymentRepository
 
 
 def is_idempotency_key_violation(error: IntegrityError) -> bool:

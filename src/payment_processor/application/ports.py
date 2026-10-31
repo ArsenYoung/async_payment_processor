@@ -1,9 +1,10 @@
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from payment_processor.application.events import PaymentCreatedEvent
-from payment_processor.application.records import PaymentRecord
+from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
+from payment_processor.application.records import PaymentInput, PaymentRecord
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.domain.payment import PaymentStatus
 
@@ -33,7 +34,7 @@ class PaymentCreationStore(PaymentReader, Protocol):
 
     def set_event_payload(self, payload: dict[str, object]) -> None: ...
 
-    async def save_with_outbox(self, payment: PaymentRecord) -> PaymentRecord: ...
+    async def save_with_outbox(self, payment: PaymentInput) -> PaymentRecord: ...
 
 
 class PaymentProcessingStore(Protocol):
@@ -46,3 +47,19 @@ class WebhookDeliveryStore(PaymentProcessingStore, Protocol):
 
 class PaymentRepository(PaymentCreationStore, WebhookDeliveryStore, Protocol):
     pass
+
+
+class OutboxStore(Protocol):
+    async def fetch_unpublished(self, limit: int) -> Sequence[OutboxRecord]: ...
+
+    async def mark_published(self, event: OutboxRecord) -> None: ...
+
+    async def record_failure(
+        self,
+        event: OutboxRecord,
+        error: str,
+        *,
+        next_attempt_at: datetime | None = None,
+    ) -> None: ...
+
+    async def quarantine(self, event: OutboxRecord, error: str) -> None: ...

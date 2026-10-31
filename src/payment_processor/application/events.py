@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal, Protocol
@@ -18,6 +19,12 @@ class OutboxRecord(Protocol):
     payment_id: UUID
     event_type: OutboxEventType
     payload: dict[str, Any]
+    attempts: int
+    published_at: datetime | None
+    last_error: str | None
+    next_attempt_at: datetime | None
+    quarantined_at: datetime | None
+    created_at: datetime
 
 
 class PaymentCreatedPayload(BaseModel):

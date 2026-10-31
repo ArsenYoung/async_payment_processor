@@ -2,10 +2,16 @@ from contextlib import asynccontextmanager
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
-from payment_processor.application.errors import IdempotencyKeyViolationError
-from payment_processor.db.repositories.factories import payment_repository_scope
+from payment_processor.application.errors import (
+    IdempotencyKeyViolationError,
+    PersistenceUnavailableError,
+)
+from payment_processor.db.repositories.factories import (
+    outbox_repository_scope,
+    payment_repository_scope,
+)
 
 
 def integrity_error(sqlstate: str | None, constraint: str | None) -> IntegrityError:
@@ -104,3 +110,40 @@ async def test_scope_commits_without_error() -> None:
         assert not committed
 
     assert committed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["query", "commit"])
+@pytest.mark.parametrize("unavailable", [False, True])
+async def test_outbox_scope_translates_only_temporary_database_errors(
+    stage: str, unavailable: bool
+) -> None:
+    error = (OperationalError if unavailable else ProgrammingError)(
+        "SELECT", {}, RuntimeError("database error")
+    )
+    exited = False
+
+    @asynccontextmanager
+    async def session_scope():
+        nonlocal exited
+        try:
+            yield object()
+            if stage == "commit":
+                raise error
+        finally:
+            exited = True
+
+    scope = outbox_repository_scope(session_scope, Mock())
+
+    with pytest.raises(
+        PersistenceUnavailableError if unavailable else ProgrammingError
+    ) as caught:
+        async with scope():
+            if stage == "query":
+                raise error
+
+    assert exited
+    if unavailable:
+        assert caught.value.__cause__ is error
+    else:
+        assert caught.value is error
