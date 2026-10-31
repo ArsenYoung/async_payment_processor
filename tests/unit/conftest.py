@@ -1,5 +1,6 @@
 import pytest
-from fakes import FakeGateway, FakeWebhookSender, MemoryPayments
+
+from .fakes import FakeGateway, FakeWebhookSender, MemoryPayments
 
 
 @pytest.fixture

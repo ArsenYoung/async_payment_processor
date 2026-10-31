@@ -670,6 +670,17 @@ Application unit проверяет use case'ы через fake-порты с in
 для unit допустимы тестовые адреса недоступных сервисов. Smoke/e2e поднимают собственные
 окружения и по умолчанию пропускаются без соответствующих `RUN_*` флагов.
 
+Контракты репозитория в `tests/test_repository_contracts.py` выполняют одинаковые сценарии
+для in-memory fake и SQLAlchemy: явное сохранение, rollback и владение lease.
+`tests/test_publisher_contracts.py` проверяет application-порт publisher, включая ACK,
+таймаут и фактическую persistent-доставку в RabbitMQ; `tests/test_webhook_contracts.py`
+проверяет application snapshot, общий deadline и отмену HTTP-запроса через MockTransport.
+Дополнительные проверки HTTP-ответов и сетевых ошибок остаются в `tests/test_webhooks.py`.
+
+```bash
+poetry run pytest -q tests/test_repository_contracts.py tests/test_publisher_contracts.py tests/test_webhook_contracts.py
+```
+
 Запустить unit и integration без включения Docker E2E и smoke:
 
 
