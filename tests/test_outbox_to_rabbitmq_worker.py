@@ -455,10 +455,12 @@ async def test_running_publisher_publishes_new_payment_automatically(
                             event = PaymentCreatedEvent.model_validate_json(
                                 message.body
                             )
-                            assert event.payload.payment_id == payment.id
+                            assert event.payload.payment_id == payment.payment_id
                         async with outbox_database.session_scope() as session:
                             record = await session.scalar(
-                                select(Outbox).where(Outbox.payment_id == payment.id)
+                                select(Outbox).where(
+                                    Outbox.payment_id == payment.payment_id
+                                )
                             )
                             assert record is not None
                             assert record.published_at is not None

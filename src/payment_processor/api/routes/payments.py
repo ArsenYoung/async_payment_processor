@@ -12,10 +12,6 @@ from payment_processor.api.schemas.payment import (
 )
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.application.commands import CreatePaymentCommand, GetPaymentQuery
-from payment_processor.application.results import (
-    PaymentCreatedResult,
-    PaymentDetailsResult,
-)
 from payment_processor.services.payment_creation import IdempotencyConflictError
 from payment_processor.services.payment_service import PaymentService
 
@@ -38,7 +34,7 @@ async def create_payment(
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentCreateResponse:
     try:
-        payment = await payment_service.create_payment(
+        result = await payment_service.create_payment(
             CreatePaymentCommand(
                 amount=request.amount,
                 currency=request.currency,
@@ -54,7 +50,6 @@ async def create_payment(
             detail="Idempotency key was used with a different request",
         ) from error
 
-    result = PaymentCreatedResult.from_payment(payment)
     http_request.state.payment_id = result.payment_id
     return PaymentCreateResponse(
         payment_id=result.payment_id,
@@ -74,14 +69,13 @@ async def get_payment(
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentDetailsResponse:
     request.state.payment_id = payment_id
-    payment = await payment_service.get_payment(GetPaymentQuery(payment_id))
-    if payment is None:
+    result = await payment_service.get_payment(GetPaymentQuery(payment_id))
+    if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Payment not found",
         )
 
-    result = PaymentDetailsResult.from_payment(payment)
     return PaymentDetailsResponse(
         payment_id=result.payment_id,
         amount=result.amount,

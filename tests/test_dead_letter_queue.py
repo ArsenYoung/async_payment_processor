@@ -130,7 +130,7 @@ async def test_webhook_exhaustion_preserves_result_and_dead_letter_diagnostics(
     assert call_times[1] - call_times[0] >= 0.09
     assert call_times[2] - call_times[1] >= 0.18
     assert all(request.content == requests[0].content for request in requests)
-    payment = await service.get_payment(initial.id)
+    payment = await service.get_payment(initial.payment_id)
     assert payment is not None
     assert payment.status == status
     assert payment.created_at == initial.created_at

@@ -1,5 +1,6 @@
 """Stable results exposed by application use cases."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -32,6 +33,7 @@ class PaymentDetailsResult:
     status: PaymentStatus
     created_at: datetime
     processed_at: datetime | None
+    webhook_delivered_at: datetime | None = None
 
     @classmethod
     def from_payment(cls, payment: Payment) -> "PaymentDetailsResult":
@@ -40,10 +42,11 @@ class PaymentDetailsResult:
             amount=payment.amount,
             currency=payment.currency,
             description=payment.description,
-            metadata=payment.payment_metadata,
+            metadata=deepcopy(payment.payment_metadata),
             idempotency_key=payment.idempotency_key,
             webhook_url=payment.webhook_url,
             status=payment.status,
             created_at=payment.created_at,
             processed_at=payment.processed_at,
+            webhook_delivered_at=payment.webhook_delivered_at,
         )

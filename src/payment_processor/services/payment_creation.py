@@ -1,16 +1,18 @@
 import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from sqlalchemy.exc import IntegrityError
 
+from payment_processor.application.results import PaymentCreatedResult
 from payment_processor.db.models import Payment
 from payment_processor.db.repositories.payments import is_idempotency_key_violation
+from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload
 from payment_processor.services.payment_rules import matches_create_command
-from payment_processor.services.ports import PaymentCreationStore, PaymentReader
+from payment_processor.services.ports import PaymentCreationStore
 
 logger = logging.getLogger(__name__)
 
@@ -28,22 +30,17 @@ class CreatePaymentUseCase:
     ) -> None:
         self._store_scope_factory = store_scope_factory
 
-    async def create(
-        self, command: CreatePaymentCommand
-    ) -> Payment:
+    async def create(self, command: CreatePaymentCommand) -> PaymentCreatedResult:
+        Money(command.amount, str(command.currency))
+        IdempotencyKey(command.idempotency_key)
+        WebhookUrl(command.webhook_url)
         try:
-            return await self._create(command)
+            payment = await self._create(command)
         except IntegrityError as error:
-            return await self._recover(command, error)
+            payment = await self._recover(command, error)
+        return PaymentCreatedResult.from_payment(payment)
 
-    async def get(self, payment_id: UUID) -> Payment | None:
-        async with self._store_scope_factory() as repository:
-            reader: PaymentReader = repository
-            return await reader.find_by_id(payment_id)
-
-    async def _create(
-        self, command: CreatePaymentCommand
-    ) -> Payment:
+    async def _create(self, command: CreatePaymentCommand) -> Payment:
         async with self._store_scope_factory() as repository:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is not None:

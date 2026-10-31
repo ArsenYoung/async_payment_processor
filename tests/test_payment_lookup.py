@@ -24,11 +24,11 @@ async def test_get_payment_returns_saved_details_after_session_closes(
 
     assert payment is not None
     assert payment is not saved_payment
-    assert payment.id == saved_payment.id
+    assert payment.payment_id == saved_payment.id
     assert payment.amount == saved_payment.amount
     assert payment.currency == saved_payment.currency
     assert payment.description == saved_payment.description
-    assert payment.payment_metadata == saved_payment.payment_metadata
+    assert payment.metadata == saved_payment.payment_metadata
     assert payment.idempotency_key == saved_payment.idempotency_key
     assert payment.webhook_url == saved_payment.webhook_url
     assert payment.status == status
