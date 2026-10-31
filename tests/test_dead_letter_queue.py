@@ -24,6 +24,8 @@ from payment_processor.messaging.schemas import (
     PaymentResultPayload,
 )
 
+pytestmark = pytest.mark.integration
+
 
 async def receive_dead_letter(broker: RabbitBroker) -> AbstractIncomingMessage:
     queue = await broker.declare_queue(topology.dead_letter_queue())

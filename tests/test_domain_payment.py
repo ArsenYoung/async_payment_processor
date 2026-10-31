@@ -12,6 +12,8 @@ from payment_processor.domain.payment import (
     PaymentStatus,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def make_payment(**state: Any) -> Payment:
     return Payment(

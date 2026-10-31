@@ -8,6 +8,8 @@ import pytest_asyncio
 
 from payment_processor.core import worker as worker_module
 
+pytestmark = pytest.mark.unit
+
 
 @pytest_asyncio.fixture
 async def loop_signals(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:

@@ -24,6 +24,8 @@ from payment_processor.services.payment_lookup import GetPaymentUseCase
 from payment_processor.services.payment_processing import ProcessPaymentUseCase
 from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
 
+pytestmark = pytest.mark.unit
+
 
 def store_scope(repository: object) -> object:
     @asynccontextmanager

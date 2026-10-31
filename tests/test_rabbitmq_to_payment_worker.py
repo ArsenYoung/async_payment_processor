@@ -9,6 +9,8 @@ from payment_processor.db.session import Database
 from payment_processor.rabbitmq_to_payment_worker import main as consumer_main
 from payment_processor.services.payment_service import PaymentService
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def consumer_runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:

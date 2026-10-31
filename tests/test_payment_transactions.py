@@ -12,6 +12,8 @@ from sqlalchemy.orm import Mapper
 from payment_processor.db.models import Outbox, Payment
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_outbox_insert_failure_rolls_back_payment_and_allows_retry(

@@ -237,3 +237,17 @@ def payment_headers(idempotency_key: str) -> dict[str, str]:
         "X-API-Key": settings.api_key,
         "Idempotency-Key": idempotency_key,
     }
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    levels = {"unit", "integration", "smoke", "e2e"}
+    invalid = [
+        item.nodeid
+        for item in items
+        if len({mark.name for mark in item.iter_markers()} & levels) != 1
+    ]
+    if invalid:
+        raise pytest.UsageError(
+            "Each test must have exactly one test level marker:\n" + "\n".join(invalid)
+        )

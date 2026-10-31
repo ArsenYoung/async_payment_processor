@@ -1,9 +1,12 @@
 import httpx
+import pytest
 
 from payment_processor.messaging.payment_event_failures import (
     classify_payment_event_failure,
 )
 from payment_processor.messaging.retry import RetryPolicy
+
+pytestmark = pytest.mark.unit
 
 
 def test_invalid_message_is_never_retryable() -> None:

@@ -84,6 +84,7 @@ async def _publish(broker: RabbitBroker, event: PaymentCreatedEvent | dict) -> N
     )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_subscriber_processes_before_delivering_webhook(
     payment_event: PaymentCreatedEvent,
@@ -106,6 +107,7 @@ async def test_subscriber_processes_before_delivering_webhook(
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["processing", "delivery"])
 async def test_subscriber_routes_dependency_errors_to_dlq(
@@ -132,6 +134,7 @@ async def test_subscriber_routes_dependency_errors_to_dlq(
         service.deliver_webhook.assert_not_awaited()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["event_id", "event_type", "payment_id", "amount"])
 async def test_invalid_event_is_rejected_before_processing(
@@ -161,6 +164,7 @@ async def test_invalid_event_is_rejected_before_processing(
     service.deliver_webhook.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_event_commits_result_then_delivers_saved_data(
@@ -224,6 +228,7 @@ async def test_event_commits_result_then_delivers_saved_data(
         assert payment.webhook_delivered_at.utcoffset().total_seconds() == 0
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unknown_payment_does_not_call_gateway_or_webhook(
     outbox_database: Database,
@@ -248,6 +253,7 @@ async def test_unknown_payment_does_not_call_gateway_or_webhook(
     webhook.send.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_gateway_error_leaves_payment_pending_without_webhook(
     outbox_database: Database,
@@ -278,6 +284,7 @@ async def test_gateway_error_leaves_payment_pending_without_webhook(
         assert payment.webhook_delivered_at is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 @pytest.mark.parametrize("failure", ["http", "connection", "timeout"])
@@ -324,6 +331,7 @@ async def test_webhook_failure_preserves_committed_payment_result(
         assert payment.webhook_delivered_at is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
@@ -365,6 +373,7 @@ async def test_duplicate_event_preserves_result_and_skips_delivered_webhook(
         assert repeated.created_at == first.created_at
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 @pytest.mark.parametrize("failure", ["http", "connection", "timeout"])
@@ -439,6 +448,7 @@ async def test_repeated_event_retries_failed_webhook_without_repeating_gateway(
         assert repeated.webhook_delivered_at == delivered.webhook_delivered_at
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
@@ -521,6 +531,7 @@ async def test_repeated_event_resends_webhook_after_delivery_commit_failure(
         assert repeated.webhook_delivered_at == delivered.webhook_delivered_at
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_delivery_of_unknown_payment_raises_before_sending(
     outbox_database: Database,
@@ -536,6 +547,7 @@ async def test_delivery_of_unknown_payment_raises_before_sending(
     webhook.send.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_pending_payment_cannot_be_delivered(
     outbox_database: Database, saved_event: PaymentCreatedEvent
@@ -556,6 +568,7 @@ async def test_pending_payment_cannot_be_delivered(
         assert payment.webhook_delivered_at is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_real_rabbitmq_message_completes_payment_and_delivery(

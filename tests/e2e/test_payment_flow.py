@@ -6,6 +6,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+pytestmark = pytest.mark.e2e
+
 
 @pytest.mark.parametrize("status", ["succeeded", "failed"])
 def test_payment_flow(payment_stack, status: str) -> None:

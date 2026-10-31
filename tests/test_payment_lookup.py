@@ -9,6 +9,8 @@ from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", list(PaymentStatus))

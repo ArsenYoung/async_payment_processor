@@ -11,6 +11,8 @@ from payment_processor.db.session import Database
 from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 from payment_processor.services.payment_events import build_payment_created_payload
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_payment_adapter_persists_plain_data_with_outbox(

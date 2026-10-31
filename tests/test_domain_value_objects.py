@@ -4,6 +4,8 @@ import pytest
 
 from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 
+pytestmark = pytest.mark.unit
+
 
 def test_money_accepts_positive_amount() -> None:
     assert Money(Decimal("10.50"), "RUB").amount == Decimal("10.50")

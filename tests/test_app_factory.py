@@ -25,6 +25,7 @@ async def applications() -> AsyncIterator[tuple[FastAPI, FastAPI]]:
         await second.state.database.dispose()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_applications_have_independent_database_connections(
     applications: tuple[FastAPI, FastAPI],
@@ -45,6 +46,7 @@ async def test_applications_have_independent_database_connections(
         assert await session.scalar(text("SELECT pg_backend_pid()")) == connection_id
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_payment_route_uses_database_of_its_application(
     applications: tuple[FastAPI, FastAPI],
@@ -83,6 +85,7 @@ async def test_payment_route_uses_database_of_its_application(
         transaction_factory.assert_called_once_with()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_lifespan_checks_supplied_database_and_releases_resources() -> None:
     database = Mock(spec=Database)
@@ -101,6 +104,7 @@ async def test_lifespan_checks_supplied_database_and_releases_resources() -> Non
     ]
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["database", "body", "database-dispose"])
 async def test_lifespan_releases_database_when_startup_or_shutdown_fails(
@@ -123,6 +127,7 @@ async def test_lifespan_releases_database_when_startup_or_shutdown_fails(
     database.dispose.assert_awaited_once_with()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_each_application_has_healthcheck(
     applications: tuple[FastAPI, FastAPI],
@@ -139,6 +144,7 @@ async def test_each_application_has_healthcheck(
         assert response.json() == {"status": "ok"}
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_each_application_has_protected_payment_route(
     applications: tuple[FastAPI, FastAPI],
@@ -153,6 +159,7 @@ async def test_each_application_has_protected_payment_route(
         assert response.json() == {"detail": "Invalid API key"}
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_each_application_protects_added_routes(
     applications: tuple[FastAPI, FastAPI],
@@ -175,6 +182,7 @@ async def test_each_application_protects_added_routes(
         assert authorized.json() == {"status": "protected"}
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("path", "content_type"),
@@ -203,6 +211,7 @@ async def test_each_application_exposes_public_documentation(
         assert response.headers["content-type"].startswith(content_type)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("path", "method"),
@@ -233,6 +242,7 @@ async def test_each_application_documents_api_key_authorization(
         assert schema["paths"][path][method]["security"] == [{"APIKey": []}]
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_each_application_uses_validation_error_handler(
     applications: tuple[FastAPI, FastAPI],

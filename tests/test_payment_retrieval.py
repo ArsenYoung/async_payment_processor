@@ -11,6 +11,8 @@ from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.services.payment_service import PaymentService
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payment_status", list(PaymentStatus))

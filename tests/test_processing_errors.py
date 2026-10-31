@@ -26,6 +26,7 @@ from payment_processor.db.session import Database
 from payment_processor.messaging.errors import is_retryable_processing_error
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "error",
     [
@@ -47,6 +48,7 @@ def test_transient_dependency_errors_are_retryable(error: BaseException) -> None
     assert is_retryable_processing_error(error)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("status_code", [301, 400, 401, 404, 408, 429, 500, 503])
 def test_unsuccessful_webhook_responses_are_retryable(status_code: int) -> None:
     request = httpx.Request("POST", "https://example.com/webhook")
@@ -57,6 +59,7 @@ def test_unsuccessful_webhook_responses_are_retryable(status_code: int) -> None:
     assert is_retryable_processing_error(caught.value)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("sqlstate", "retryable"),
     [
@@ -90,6 +93,7 @@ def test_database_sqlstate_controls_retry(
     assert is_retryable_processing_error(error) is retryable
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "error",
     [
@@ -112,6 +116,7 @@ def test_permanent_errors_and_cancellation_are_not_retryable(
     assert not is_retryable_processing_error(error)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["process_payment", "deliver_webhook"])
 async def test_missing_payment_has_explicit_non_retryable_error(
@@ -136,6 +141,7 @@ async def test_missing_payment_has_explicit_non_retryable_error(
     webhook.send.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_failed_gateway_outcome_is_saved_and_delivered(
     outbox_database: Database, payment_payload: dict
@@ -168,6 +174,7 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
         assert saved.webhook_delivered_at is not None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["timeout", "connection"])
 async def test_retryable_gateway_error_preserves_pending_payment(
@@ -199,6 +206,7 @@ async def test_retryable_gateway_error_preserves_pending_payment(
         assert saved.webhook_delivered_at is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 @pytest.mark.parametrize("failure", ["http", "timeout", "connection"])
