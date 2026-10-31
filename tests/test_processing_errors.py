@@ -20,7 +20,7 @@ from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.application.commands import CreatePaymentCommand
-from payment_processor.application.errors import PaymentNotFoundError
+from payment_processor.application.errors import LeaseBusyError, PaymentNotFoundError
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.session import Database
@@ -32,6 +32,7 @@ from payment_processor.messaging.errors import is_retryable_processing_error
     "error",
     [
         TimeoutError("Gateway timeout"),
+        LeaseBusyError("Lease is busy"),
         ConnectionError("Gateway unavailable"),
         httpx.ConnectError("Connection failed"),
         httpx.ReadTimeout("Response timeout"),
