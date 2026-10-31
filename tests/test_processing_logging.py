@@ -105,7 +105,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
                 outbox_database.session_scope, RabbitEventPublisher(routing_broker)
             ).publish_batch(10) == PublicationResult(1, 0)
             await wait_for_log(caplog, "consume", "completed")
-            await topology.publish_payment_event(routing_broker, retry_event)
+            await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
             await wait_for_log(caplog, "consume", "completed", 2)
 
     captured = entries(caplog)
@@ -178,7 +178,7 @@ async def test_real_dlq_logs_exhaustion_and_preserves_event_context(
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     async with WebhookClient(timeout=1) as webhook:
         async with retry_consumer(service, webhook):
-            await topology.publish_payment_event(routing_broker, retry_event)
+            await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
             await wait_for_log(caplog, "dlq_publish", "published")
     captured = entries(caplog)
     dead = [entry for entry in captured if entry.get("operation") == "dlq_publish"]
@@ -344,7 +344,7 @@ async def test_transfer_result_is_logged_after_broker_confirmation(
     retry: RetryAttempt | None,
     confirmed: bool,
 ) -> None:
-    await topology.publish_payment_event(routing_broker, retry_event)
+    await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
     queue = await routing_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
     incoming = await queue.get(timeout=2)
     received = asyncio.Event()

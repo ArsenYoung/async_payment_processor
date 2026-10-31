@@ -21,6 +21,7 @@ from sqlalchemy.exc import OperationalError
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import (
     ATTEMPT_HEADER,
     RetryAttempt,
@@ -482,7 +483,7 @@ async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
         retry_policy=RetryPolicy(base_delay=0.1),
     )
     await routing_broker.start()
-    await topology.publish_payment_event(routing_broker, payment_event)
+    await RabbitEventPublisher(routing_broker).publish_payment_created(payment_event, timeout=5.0)
     message = await receive(routing_broker, topology.dead_letter_queue())
     async with message.process():
         assert PaymentCreatedEvent.model_validate_json(message.body) == payment_event

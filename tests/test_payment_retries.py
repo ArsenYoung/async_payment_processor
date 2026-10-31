@@ -71,7 +71,7 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
         async with retry_consumer(service, webhook) as (_, deliveries):
-            await topology.publish_payment_event(routing_broker, retry_event)
+            await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
             async with asyncio.timeout(10):
                 while True:
                     delivered = await service.get_payment(initial.payment_id)

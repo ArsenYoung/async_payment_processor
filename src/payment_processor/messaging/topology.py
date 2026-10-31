@@ -20,7 +20,6 @@ from payment_processor.messaging.retry import (
     RetryAttempt,
     failure_headers,
 )
-from payment_processor.messaging.schemas import PaymentCreatedEvent
 
 logger = logging.getLogger(__name__)
 PAYMENTS_EXCHANGE = RabbitExchange(
@@ -161,23 +160,3 @@ async def publish_failed_payment(
         },
     )
 
-
-async def publish_payment_event(
-    broker: RabbitBroker,
-    event: PaymentCreatedEvent,
-    *,
-    timeout: float = 5.0,
-) -> None:
-    async with asyncio.timeout(timeout):
-        confirmation = await broker.publish(
-            event.model_dump(mode="json"),
-            exchange=PAYMENTS_EXCHANGE,
-            routing_key=PAYMENTS_NEW_QUEUE.routing(),
-            mandatory=True,
-            persist=True,
-            timeout=timeout,
-            message_id=str(event.event_id),
-            message_type=event.event_type.value,
-        )
-    if not isinstance(confirmation, Basic.Ack):
-        raise RuntimeError("RabbitMQ did not acknowledge payment event publication")

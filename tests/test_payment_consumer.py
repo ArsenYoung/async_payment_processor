@@ -26,6 +26,7 @@ from payment_processor.db.session import Database
 from payment_processor.domain.payment import PaymentCurrency
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import RetryPolicy
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
@@ -594,7 +595,7 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
                 try:
                     await topology.declare_payment_topology(broker)
                     await broker.start()
-                    await topology.publish_payment_event(broker, saved_event)
+                    await RabbitEventPublisher(broker).publish_payment_created(saved_event, timeout=5.0)
                     async with asyncio.timeout(5):
                         while True:
                             async with outbox_database.session_scope() as session:
