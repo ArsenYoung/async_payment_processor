@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.application.errors import IdempotencyKeyViolationError
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
@@ -299,7 +300,7 @@ async def test_duplicate_key_error_is_preserved_if_payment_cannot_be_found(
         database, override_payment_service
     )
 
-    with pytest.raises(IntegrityError) as caught:
+    with pytest.raises(IdempotencyKeyViolationError) as caught:
         await client.post(
             "/api/v1/payments",
             headers=payment_headers,
@@ -308,10 +309,10 @@ async def test_duplicate_key_error_is_preserved_if_payment_cannot_be_found(
 
     assert repository_factory.call_count == 2
     assert len(errors) == 1
-    assert caught.value is errors[0]
-    assert getattr(caught.value.orig, "sqlstate", None) == "23505"
+    assert caught.value.__cause__ is errors[0]
+    assert getattr(errors[0].orig, "sqlstate", None) == "23505"
     assert (
-        getattr(caught.value.orig.__cause__, "constraint_name", None)
+        getattr(errors[0].orig.__cause__, "constraint_name", None)
         == "uq_payments_idempotency_key"
     )
 
