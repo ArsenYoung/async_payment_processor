@@ -75,10 +75,10 @@ def dead_letter_queue() -> RabbitQueue:
 
 
 async def declare_retry_topology(
-    broker: RabbitBroker, policy: RetryPolicy = RetryPolicy()
+    broker: RabbitBroker, policy: RetryPolicy | None = None
 ) -> None:
     exchange = await broker.declare_exchange(retry_exchange())
-    for attempt in policy.retry_attempts:
+    for attempt in (policy if policy is not None else RetryPolicy()).retry_attempts:
         definition = retry_queue(attempt)
         queue = await broker.declare_queue(definition)
         await queue.bind(exchange, routing_key=definition.routing())
