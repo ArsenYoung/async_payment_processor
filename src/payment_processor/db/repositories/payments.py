@@ -10,7 +10,6 @@ from payment_processor.application.ports import LeaseOperation
 from payment_processor.application.ports import (
     PaymentRepository as PaymentRepositoryPort,
 )
-from payment_processor.application.records import PaymentInput
 from payment_processor.db.mappers.payment import to_domain, to_model, update_model
 from payment_processor.db.models import Outbox, OutboxEventType
 from payment_processor.db.models.payment import Payment as PaymentModel
@@ -103,18 +102,8 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
         await self.save(payment)
 
     async def save_with_outbox(
-        self, payment: PaymentInput, *, event_payload: dict[str, object]
+        self, payment: Payment, *, event_payload: dict[str, object]
     ) -> Payment:
-        if not isinstance(payment, Payment):
-            payment = Payment(
-                id=payment.id,
-                amount=payment.amount,
-                currency=payment.currency,
-                description=payment.description,
-                payment_metadata=payment.payment_metadata,
-                idempotency_key=payment.idempotency_key,
-                webhook_url=payment.webhook_url,
-            )
         model = to_model(payment)
         self.session.add(model)
         await self.session.flush()

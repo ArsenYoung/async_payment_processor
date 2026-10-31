@@ -4,19 +4,19 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from payment_processor.application.records import NewPayment
 from payment_processor.db.models import Outbox, Payment
+from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.db.repositories.factories import payment_repository_scope
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
-from payment_processor.services.payment_events import build_payment_created_payload
+from payment_processor.application.payment_events import build_payment_created_payload
 
 
 @pytest.mark.asyncio
-async def test_payment_adapter_persists_plain_data_with_outbox(
+async def test_payment_adapter_persists_domain_payment_with_outbox(
     outbox_database: Database,
 ) -> None:
-    draft = NewPayment(
+    draft = DomainPayment(
         id=uuid4(),
         amount=Decimal("10.50"),
         currency=PaymentCurrency.RUB,
@@ -58,7 +58,7 @@ async def test_payment_adapter_keeps_each_explicit_event_payload(
     outbox_database: Database,
 ) -> None:
     drafts = [
-        NewPayment(
+        DomainPayment(
             id=uuid4(),
             amount=Decimal(amount),
             currency=PaymentCurrency.RUB,

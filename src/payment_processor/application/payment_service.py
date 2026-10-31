@@ -14,10 +14,10 @@ from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
-from payment_processor.services.payment_creation import CreatePaymentUseCase
-from payment_processor.services.payment_lookup import GetPaymentUseCase
-from payment_processor.services.payment_processing import ProcessPaymentUseCase
-from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
+from payment_processor.application.payment_creation import CreatePaymentUseCase
+from payment_processor.application.payment_lookup import GetPaymentUseCase
+from payment_processor.application.payment_processing import ProcessPaymentUseCase
+from payment_processor.application.webhook_delivery import DeliverPaymentWebhookUseCase
 
 
 class PaymentService:

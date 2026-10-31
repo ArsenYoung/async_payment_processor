@@ -16,13 +16,13 @@ from payment_processor.application.results import (
     PaymentDetailsResult,
 )
 from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.services.payment_creation import (
+from payment_processor.application.payment_creation import (
     CreatePaymentUseCase,
     IdempotencyConflictError,
 )
-from payment_processor.services.payment_lookup import GetPaymentUseCase
-from payment_processor.services.payment_processing import ProcessPaymentUseCase
-from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
+from payment_processor.application.payment_lookup import GetPaymentUseCase
+from payment_processor.application.payment_processing import ProcessPaymentUseCase
+from payment_processor.application.webhook_delivery import DeliverPaymentWebhookUseCase
 
 
 def store_scope(repository: object) -> object:
@@ -420,7 +420,7 @@ async def test_external_deadline_releases_lease(
 ) -> None:
     import asyncio
 
-    from payment_processor.services import payment_processing, webhook_delivery
+    from payment_processor.application import payment_processing, webhook_delivery
 
     saved = payment() if operation == "process" else payment(PaymentStatus.SUCCEEDED)
     repository = AsyncMock()

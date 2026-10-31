@@ -31,7 +31,7 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.payment_service import PaymentService
 
 
 @pytest_asyncio.fixture

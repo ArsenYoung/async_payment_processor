@@ -17,7 +17,7 @@ from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.payment_service import PaymentService
 
 
 @pytest.mark.asyncio

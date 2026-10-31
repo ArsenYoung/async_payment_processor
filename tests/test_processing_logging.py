@@ -29,7 +29,7 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.outbox_service import PublicationResult
+from payment_processor.application.outbox_service import PublicationResult
 
 
 @pytest.fixture(autouse=True)

@@ -10,7 +10,7 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.topology import declare_payment_topology
-from payment_processor.services.outbox_service import OutboxService
+from payment_processor.application.outbox_service import OutboxService
 
 
 async def run_publisher() -> None:

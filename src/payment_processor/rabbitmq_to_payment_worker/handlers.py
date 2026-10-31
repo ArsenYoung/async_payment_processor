@@ -15,7 +15,7 @@ from payment_processor.messaging.payment_event_failures import (
 )
 from payment_processor.messaging.retry import RetryPolicy, read_attempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.payment_service import PaymentService
 
 logger = logging.getLogger(__name__)
 

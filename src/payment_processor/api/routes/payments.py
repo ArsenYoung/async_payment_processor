@@ -13,8 +13,8 @@ from payment_processor.api.schemas.payment import (
 from payment_processor.api.schemas.validation import validate_database_text
 from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.domain.validation import IDEMPOTENCY_KEY_MAX_LENGTH
-from payment_processor.services.payment_creation import IdempotencyConflictError
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.payment_creation import IdempotencyConflictError
+from payment_processor.application.payment_service import PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 

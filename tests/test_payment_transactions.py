@@ -15,7 +15,7 @@ from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.domain.payment import PaymentCurrency
-from payment_processor.services.payment_events import build_payment_created_payload
+from payment_processor.application.payment_events import build_payment_created_payload
 
 
 @pytest.mark.asyncio

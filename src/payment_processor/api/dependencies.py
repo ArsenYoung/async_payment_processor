@@ -9,7 +9,7 @@ from fastapi.security import APIKeyHeader
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.db.session import Database
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.payment_service import PaymentService
 
 api_key_header = APIKeyHeader(
     name="X-API-Key",
