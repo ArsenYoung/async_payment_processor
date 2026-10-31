@@ -1,10 +1,7 @@
-from datetime import datetime
 from decimal import Decimal
 
-from payment_processor.domain.payment import Payment, PaymentStatus
-from payment_processor.domain.payment import can_process as can_process
-from payment_processor.domain.payment import is_completed as is_completed
 from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.domain.payment import Payment
 
 
 def json_values_equal(left: object, right: object) -> bool:
@@ -34,7 +31,3 @@ def matches_create_command(payment: Payment, command: CreatePaymentCommand) -> b
         and json_values_equal(payment.payment_metadata, command.metadata)
         and payment.webhook_url == command.webhook_url
     )
-
-
-def can_deliver_webhook(status: PaymentStatus, processed_at: datetime | None) -> bool:
-    return is_completed(status, processed_at)

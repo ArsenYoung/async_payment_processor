@@ -15,10 +15,10 @@ from httpx import ASGITransport, AsyncClient
 from payment_processor.api import main as api_main
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.middleware import RequestLoggingMiddleware
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.core.config import settings
 from payment_processor.core.logging import ApplicationFormatter, ConsoleHandler
 from payment_processor.db.session import Database
-from payment_processor.application.payment_service import PaymentService
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ async def test_payment_requests_have_unique_request_ids_and_saved_payment_id(
         ("POST", "/api/v1/payments", True, {}, 422),
         ("POST", "/api/v1/payments", True, "{invalid-json", 422),
         ("GET", "/unknown", True, None, 404),
-        ("GET", "/docs", False, None, 200),
+        ("GET", "/docs", False, None, 401),
     ],
 )
 async def test_request_context_covers_success_authentication_and_validation(

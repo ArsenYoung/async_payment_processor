@@ -43,9 +43,11 @@ def validate_webhook_url(value: str) -> str:
         or len(value) > WEBHOOK_URL_MAX_LENGTH
         or any(character.isspace() or ord(character) < 32 for character in value)
     ):
-        raise ValueError("Webhook URL must be an HTTP or HTTPS URL of at most 2048 characters")
+        raise ValueError(
+            "Webhook URL must be an HTTP or HTTPS URL of at most 2048 characters"
+        )
     try:
-        parsed.port
+        _ = parsed.port
     except ValueError as error:
         raise ValueError("Invalid webhook URL port") from error
     return value
