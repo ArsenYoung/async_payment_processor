@@ -144,14 +144,18 @@ async def test_restart_after_confirmed_publication_repeats_same_event_ids(
     def fail_commit(session: object) -> None:
         raise error
 
+    scopes = 0
+
     @asynccontextmanager
     async def failing_scope() -> AsyncIterator[AsyncSession]:
+        nonlocal scopes
+        scopes += 1
         async with outbox_database.session_scope() as session:
-            if failure == "commit":
+            if failure == "commit" and scopes == 2:
                 event.listen(session.sync_session, "before_commit", fail_commit)
             yield session
             await session.flush()
-            if failure == "cancellation":
+            if failure == "cancellation" and scopes == 2:
                 raise asyncio.CancelledError()
 
     service = create_outbox_service(
@@ -165,7 +169,7 @@ async def test_restart_after_confirmed_publication_repeats_same_event_ids(
     if failure == "commit":
         assert caught.value.__cause__ is error
 
-    await _assert_messages(recovery_broker, recovery_events)
+    await _assert_messages(recovery_broker, recovery_events[:1])
     for record in await _read_events(outbox_database):
         assert record.published_at is None
         assert record.attempts == 0

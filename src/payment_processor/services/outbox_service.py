@@ -1,13 +1,15 @@
 import asyncio
 import logging
+import math
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
+from uuid import UUID, uuid4
 
 from payment_processor.application.errors import PersistenceUnavailableError
-from payment_processor.application.events import PaymentCreatedEvent
+from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
 from payment_processor.application.ports import EventPublisher, OutboxStore
 from payment_processor.core.logging import processing_fields
 
@@ -62,14 +64,28 @@ class OutboxService:
     async def publish_batch(
         self, limit: int, *, timeout: float = 5.0
     ) -> PublicationResult:
+        if limit <= 0:
+            raise ValueError("Batch limit must be positive")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Publication timeout must be positive and finite")
         published = 0
         failed = 0
-        results: list[tuple[dict[str, object], Exception | None]] = []
+        seen: list[UUID] = []
         context: dict[str, object] = {"operation": "outbox_poll"}
         try:
-            async with self._store_scope_factory() as repository:
-                events = await repository.fetch_unpublished(limit)
-                for record in events:
+            for _ in range(limit):
+                token = uuid4()
+                finalized = False
+                record: OutboxRecord | None = None
+                try:
+                    async with self._store_scope_factory() as repository:
+                        record = await repository.claim_next(
+                            token, max(60.0, timeout + 30.0), exclude_ids=seen
+                        )
+                    if record is None:
+                        finalized = True
+                        break
+                    seen.append(record.id)
                     started = perf_counter()
                     context = processing_fields(
                         operation="outbox_publish",
@@ -79,42 +95,62 @@ class OutboxService:
                         publication_attempt=record.attempts + 1,
                     )
                     failure: Exception | None = None
+                    invalid = False
                     try:
                         event = PaymentCreatedEvent.from_outbox(record)
                     except ValueError as error:
-                        await repository.quarantine(
-                            record, f"{type(error).__name__}: {error}"
-                        )
+                        invalid = True
                         failure = error
-                        failed += 1
                     else:
                         try:
-                            await self._publisher.publish_payment_created(
-                                event, timeout=timeout
-                            )
+                            async with asyncio.timeout(timeout):
+                                await self._publisher.publish_payment_created(
+                                    event, timeout=timeout
+                                )
                         except Exception as error:
-                            delay = min(60, 2 ** min(record.attempts, 6))
+                            failure = error
+                    async with self._store_scope_factory() as repository:
+                        current = await repository.lock_claimed(record.id, token)
+                        if invalid:
+                            await repository.quarantine(
+                                current, f"{type(failure).__name__}: {failure}"
+                            )
+                        elif failure is not None:
+                            delay = min(60, 2 ** min(current.attempts, 6))
                             await repository.record_failure(
-                                record,
-                                f"{type(error).__name__}: {error}",
+                                current,
+                                f"{type(failure).__name__}: {failure}",
                                 next_attempt_at=datetime.now(UTC)
                                 + timedelta(seconds=delay),
                             )
-                            failure = error
-                            failed += 1
                         else:
-                            await repository.mark_published(record)
-                            published += 1
-                    results.append(
-                        (
-                            {
-                                **context,
-                                "outcome": "failed" if failure else "published",
-                                "duration_ms": (perf_counter() - started) * 1000,
-                            },
-                            failure,
+                            await repository.mark_published(current)
+                        await repository.release_claim(record.id, token)
+                    finalized = True
+                    fields = {
+                        **context,
+                        "outcome": "failed" if failure else "published",
+                        "duration_ms": (perf_counter() - started) * 1000,
+                    }
+                    if failure is not None:
+                        failed += 1
+                        logger.warning(
+                            "Outbox publication failed",
+                            extra={**fields, "error_type": type(failure).__name__},
+                            exc_info=(type(failure), failure, failure.__traceback__),
                         )
-                    )
+                    else:
+                        published += 1
+                        logger.info("Outbox event published", extra=fields)
+                finally:
+                    if not finalized and record is not None:
+                        try:
+                            async with self._store_scope_factory() as repository:
+                                await repository.release_claim(record.id, token)
+                        except Exception:
+                            logger.exception(
+                                "Outbox lease cleanup failed; lease will expire"
+                            )
         except Exception as error:
             logger.exception(
                 "Outbox transaction failed",
@@ -125,13 +161,4 @@ class OutboxService:
                 },
             )
             raise
-        for fields, failure in results:
-            if failure is not None:
-                logger.warning(
-                    "Outbox publication failed",
-                    extra={**fields, "error_type": type(failure).__name__},
-                    exc_info=(type(failure), failure, failure.__traceback__),
-                )
-            else:
-                logger.info("Outbox event published", extra=fields)
         return PublicationResult(published=published, failed=failed)

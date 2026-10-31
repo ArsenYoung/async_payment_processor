@@ -820,3 +820,5 @@ docker compose logs -f api
 docker compose logs -f outbox-to-rabbitmq-worker
 docker compose logs -f rabbitmq-to-payment-worker
 ```
+
+Описание транзакций, leases, восстановления после сбоев и порядка миграции: [границы транзакций](docs/transaction-boundaries.md).

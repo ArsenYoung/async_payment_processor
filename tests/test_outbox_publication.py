@@ -267,7 +267,7 @@ async def test_stalled_publication_times_out_and_saves_diagnostic(
 
 
 @pytest.mark.asyncio
-async def test_rows_stay_locked_while_another_publisher_waits_for_confirmation(
+async def test_claimed_event_releases_locks_and_other_publisher_can_progress(
     outbox_database: Database, outbox_events: list[Outbox], broker: Mock
 ) -> None:
     entered = asyncio.Event()
@@ -294,10 +294,16 @@ async def test_rows_stay_locked_while_another_publisher_waits_for_confirmation(
             for event in await _read_events(outbox_database):
                 assert event.published_at is None
                 assert event.attempts == 0
-            assert await second_service.publish_batch(10) == PublicationResult(0, 0)
-            second_broker.publish.assert_not_awaited()
+            assert outbox_database.engine.pool.checkedout() == 0
+            async with outbox_database.session_scope() as session:
+                rows = await session.scalars(
+                    select(Outbox).with_for_update(nowait=True)
+                )
+                assert len(rows.all()) == 3
+            assert await second_service.publish_batch(10) == PublicationResult(2, 0)
+            assert second_broker.publish.await_count == 2
             release.set()
-            assert await task == PublicationResult(published=3, failed=0)
+            assert await task == PublicationResult(published=1, failed=0)
     finally:
         if not task.done():
             task.cancel()
@@ -306,7 +312,7 @@ async def test_rows_stay_locked_while_another_publisher_waits_for_confirmation(
 
 
 @pytest.mark.asyncio
-async def test_cancellation_rolls_back_batch_and_releases_locks(
+async def test_cancellation_preserves_confirmed_events_and_releases_current_claim(
     outbox_database: Database, outbox_events: list[Outbox], broker: Mock
 ) -> None:
     entered = asyncio.Event()
@@ -339,7 +345,7 @@ async def test_cancellation_rolls_back_batch_and_releases_locks(
         async with outbox_database.session_scope() as session:
             events = await OutboxRepository(session).fetch_unpublished(10)
             assert [event.id for event in events] == [
-                event.id for event in outbox_events
+                event.id for event in outbox_events[1:]
             ]
             assert all(event.attempts == 0 for event in events)
             assert all(event.last_error is None for event in events)
@@ -348,7 +354,7 @@ async def test_cancellation_rolls_back_batch_and_releases_locks(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("outcome", ["published", "failed"])
-async def test_database_error_propagates_and_rolls_back_entire_batch(
+async def test_database_error_preserves_confirmed_events_and_rolls_back_current_event(
     outbox_database: Database,
     outbox_events: list[Outbox],
     broker: Mock,
@@ -388,7 +394,7 @@ async def test_database_error_propagates_and_rolls_back_entire_batch(
         async with outbox_database.session_scope() as session:
             events = await OutboxRepository(session).fetch_unpublished(10)
             assert [event.id for event in events] == [
-                event.id for event in outbox_events
+                event.id for event in outbox_events[1:]
             ]
             assert all(event.attempts == 0 for event in events)
             assert all(event.last_error is None for event in events)
@@ -458,3 +464,108 @@ async def test_broker_failure_defers_without_quarantine(
         assert record.attempts == attempts + 1
         assert before + timedelta(seconds=delay) <= record.next_attempt_at
         assert record.next_attempt_at <= after + timedelta(seconds=delay)
+
+
+@pytest.mark.asyncio
+async def test_expired_publication_lease_is_reclaimed_and_fences_old_owner(
+    outbox_database: Database, outbox_events: list[Outbox]
+) -> None:
+    from payment_processor.application.errors import LeaseLostError
+
+    old_token, new_token = uuid4(), uuid4()
+    async with outbox_database.session_scope() as session:
+        claimed = await OutboxRepository(session).claim_next(
+            old_token, 60, exclude_ids=[]
+        )
+        assert claimed.id == outbox_events[0].id
+    async with outbox_database.session_scope() as session:
+        await session.execute(
+            update(Outbox)
+            .where(Outbox.id == claimed.id)
+            .values(publication_until=datetime.now(UTC) - timedelta(seconds=1))
+        )
+    async with outbox_database.session_scope() as session:
+        repository = OutboxRepository(session)
+        reclaimed = await repository.claim_next(new_token, 60, exclude_ids=[])
+        assert reclaimed.id == claimed.id
+        await repository.release_claim(claimed.id, old_token)
+        assert (await repository.lock_claimed(claimed.id, new_token)).id == claimed.id
+    with pytest.raises(LeaseLostError):
+        async with outbox_database.session_scope() as session:
+            await OutboxRepository(session).lock_claimed(claimed.id, old_token)
+
+
+@pytest.mark.asyncio
+async def test_lost_lease_after_broker_ack_cannot_mark_event_published(
+    outbox_database: Database, outbox_events: list[Outbox], broker: Mock
+) -> None:
+    from payment_processor.application.errors import LeaseLostError
+
+    new_token = uuid4()
+
+    async def publish(message: dict, **kwargs: object) -> Basic.Ack:
+        event_id = UUID(message["event_id"])
+        async with outbox_database.session_scope() as session:
+            await session.execute(
+                update(Outbox)
+                .where(Outbox.id == event_id)
+                .values(publication_until=datetime.now(UTC) - timedelta(seconds=1))
+            )
+        async with outbox_database.session_scope() as session:
+            reclaimed = await OutboxRepository(session).claim_next(
+                new_token, 60, exclude_ids=[]
+            )
+            assert reclaimed.id == event_id
+        return Basic.Ack()
+
+    broker.publish.side_effect = publish
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(broker)
+    )
+    with pytest.raises(LeaseLostError):
+        await service.publish_batch(1)
+    saved = (await _read_events(outbox_database))[0]
+    assert saved.publication_token == new_token
+    assert saved.published_at is None
+    assert saved.attempts == 0
+
+
+@pytest.mark.asyncio
+async def test_broker_ack_before_failed_commit_republishes_same_event_id(
+    outbox_database: Database,
+    outbox_events: list[Outbox],
+    publication_broker: RabbitBroker,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    scopes = 0
+
+    @asynccontextmanager
+    async def scope():
+        nonlocal scopes
+        scopes += 1
+        async with outbox_database.session_scope() as session:
+            yield session
+            if scopes == 2:
+                raise RuntimeError("Commit failed after broker ack")
+
+    with pytest.raises(RuntimeError, match="Commit failed"):
+        await create_outbox_service(
+            scope, RabbitEventPublisher(publication_broker)
+        ).publish_batch(1)
+    saved = (await _read_events(outbox_database))[0]
+    assert saved.published_at is None
+    assert saved.publication_token is None
+    assert saved.attempts == 0
+    service = create_outbox_service(
+        outbox_database.session_scope, RabbitEventPublisher(publication_broker)
+    )
+    assert await service.publish_batch(1) == PublicationResult(1, 0)
+    queue = await publication_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
+    for _ in range(2):
+        message = await queue.get(timeout=5)
+        async with message.process():
+            assert message.message_id == str(outbox_events[0].id)
+            event = PaymentCreatedEvent.model_validate_json(message.body)
+            assert event.event_id == outbox_events[0].id
+    assert await queue.get(fail=False, timeout=1) is None

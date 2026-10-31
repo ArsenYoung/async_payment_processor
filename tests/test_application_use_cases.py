@@ -372,3 +372,70 @@ async def test_invalid_gateway_outcome_is_not_saved() -> None:
     assert saved.status == PaymentStatus.PENDING
     assert saved.processed_at is None
     repository.save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["process", "webhook"])
+async def test_external_dependency_runs_outside_store_scope(operation: str) -> None:
+    saved = payment() if operation == "process" else payment(PaymentStatus.SUCCEEDED)
+    repository = AsyncMock()
+    repository.find_by_id_for_update.return_value = saved
+    active = 0
+
+    @asynccontextmanager
+    async def scope():
+        nonlocal active
+        active += 1
+        try:
+            yield repository
+        finally:
+            active -= 1
+
+    async def external(*args: object, **kwargs: object):
+        assert active == 0
+        return PaymentStatus.SUCCEEDED
+
+    dependency = AsyncMock()
+    if operation == "process":
+        dependency.process.side_effect = external
+        await ProcessPaymentUseCase(scope, dependency).process(saved.id)
+        dependency.process.assert_awaited_once_with(idempotency_key=saved.id)
+    else:
+        dependency.send.side_effect = external
+        await DeliverPaymentWebhookUseCase(scope).deliver(saved.id, dependency)
+    assert active == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["process", "webhook"])
+async def test_external_deadline_releases_lease(
+    operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from payment_processor.services import payment_processing, webhook_delivery
+
+    saved = payment() if operation == "process" else payment(PaymentStatus.SUCCEEDED)
+    repository = AsyncMock()
+    repository.find_by_id_for_update.return_value = saved
+
+    async def stalled(*args: object, **kwargs: object):
+        await asyncio.Event().wait()
+
+    dependency = AsyncMock()
+    target = payment_processing if operation == "process" else webhook_delivery
+    monkeypatch.setattr(target, "EXTERNAL_CALL_TIMEOUT", 0.01)
+    with pytest.raises(TimeoutError):
+        if operation == "process":
+            dependency.process.side_effect = stalled
+            await ProcessPaymentUseCase(
+                lambda: store_scope(repository), dependency
+            ).process(saved.id)
+        else:
+            dependency.send.side_effect = stalled
+            await DeliverPaymentWebhookUseCase(lambda: store_scope(repository)).deliver(
+                saved.id, dependency
+            )
+    repository.release_lease.assert_awaited_once()
+    repository.save.assert_not_awaited()
+    repository.mark_webhook_delivered.assert_not_awaited()
