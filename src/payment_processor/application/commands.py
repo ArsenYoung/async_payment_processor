@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
 
 from payment_processor.domain.payment import PaymentCurrency
 
@@ -16,18 +15,3 @@ class CreatePaymentCommand:
     metadata: dict[str, Any]
     webhook_url: str
     idempotency_key: str
-
-
-@dataclass(frozen=True, slots=True)
-class ProcessPaymentCommand:
-    payment_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class DeliverWebhookCommand:
-    payment_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class GetPaymentQuery:
-    payment_id: UUID

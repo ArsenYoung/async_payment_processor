@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import suppress
 from copy import copy
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
@@ -14,11 +15,12 @@ from pamqp.commands import Basic
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import PaymentCurrency
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
@@ -38,9 +40,17 @@ async def outbox_events(
     outbox_database: Database, payment_payload: dict
 ) -> list[Outbox]:
     service = create_payment_service(outbox_database.session_scope)
-    request = PaymentCreateRequest.model_validate(payment_payload)
     for _ in range(3):
-        await service.create_payment(request, f"test-publication-{uuid4()}")
+        await service.create_payment(
+            CreatePaymentCommand(
+                amount=Decimal(payment_payload["amount"]),
+                currency=PaymentCurrency(payment_payload["currency"]),
+                description=payment_payload["description"],
+                metadata=payment_payload["metadata"],
+                webhook_url=payment_payload["webhook_url"],
+                idempotency_key=f"test-publication-{uuid4()}",
+            )
+        )
     return await _read_events(outbox_database)
 
 

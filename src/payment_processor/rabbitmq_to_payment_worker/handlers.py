@@ -7,10 +7,6 @@ from faststream.middlewares import AckPolicy
 from faststream.rabbit import RabbitBroker, RabbitMessage
 from faststream.rabbit.message import RabbitMessage as IncomingPaymentMessage
 
-from payment_processor.application.commands import (
-    DeliverWebhookCommand,
-    ProcessPaymentCommand,
-)
 from payment_processor.application.ports import WebhookSender
 from payment_processor.core.logging import processing_context, processing_fields
 from payment_processor.messaging import topology
@@ -71,11 +67,9 @@ def register_payment_subscriber(
                     extra=processing_fields(operation="consume", outcome="received"),
                 )
                 reason = "non_retryable_processing_error"
-                await payment_service.process_payment(
-                    ProcessPaymentCommand(event.payload.payment_id)
-                )
+                await payment_service.process_payment(event.payload.payment_id)
                 await payment_service.deliver_webhook(
-                    DeliverWebhookCommand(event.payload.payment_id), webhook_client
+                    event.payload.payment_id, webhook_client
                 )
             except Exception as error:
                 decision = classify_payment_event_failure(
