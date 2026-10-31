@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -53,7 +53,6 @@ def payment(status: PaymentStatus = PaymentStatus.PENDING) -> Payment:
 async def test_create_use_case_saves_payment_and_event_payload() -> None:
     saved = payment()
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.return_value = None
     repository.save_with_outbox.return_value = saved
 
@@ -70,8 +69,18 @@ async def test_create_use_case_saves_payment_and_event_payload() -> None:
 
     assert result.payment_id == saved.id
     assert isinstance(result, PaymentCreatedResult)
-    repository.set_event_payload.assert_called_once()
     repository.save_with_outbox.assert_awaited_once()
+    created = repository.save_with_outbox.call_args.args[0]
+    assert repository.save_with_outbox.call_args.kwargs == {
+        "event_payload": {
+            "payment_id": str(created.id),
+            "amount": "10.50",
+            "currency": "RUB",
+            "description": command.description,
+            "metadata": command.metadata,
+            "webhook_url": command.webhook_url,
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -297,7 +306,6 @@ async def test_create_recovers_idempotency_violation(
     if conflict:
         saved.amount += Decimal("1")
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.side_effect = [None, saved]
     error = IdempotencyKeyViolationError()
     repository.save_with_outbox.side_effect = error
@@ -315,7 +323,6 @@ async def test_create_recovers_idempotency_violation(
 @pytest.mark.asyncio
 async def test_create_preserves_violation_when_payment_cannot_be_found() -> None:
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.return_value = None
     error = IdempotencyKeyViolationError()
     repository.save_with_outbox.side_effect = error

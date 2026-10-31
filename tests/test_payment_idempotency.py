@@ -444,7 +444,9 @@ def _insert_invalid_outbox(
     outbox_id: UUID,
 ) -> Mock:
     class InvalidOutboxRepository(MissingPaymentRepository):
-        async def save_with_outbox(self, payment: Payment) -> Payment:
+        async def save_with_outbox(
+            self, payment: Payment, *, event_payload: dict[str, object]
+        ) -> Payment:
             self.session.add(
                 Outbox(
                     id=outbox_id if violation == "duplicate-outbox" else uuid4(),
@@ -473,9 +475,13 @@ def _hide_existing_payment(
     errors: list[IntegrityError] = []
 
     class UnfindablePaymentRepository(MissingPaymentRepository):
-        async def save_with_outbox(self, payment: Payment) -> Payment:
+        async def save_with_outbox(
+            self, payment: Payment, *, event_payload: dict[str, object]
+        ) -> Payment:
             try:
-                return await super().save_with_outbox(payment)
+                return await super().save_with_outbox(
+                    payment, event_payload=event_payload
+                )
             except IntegrityError as error:
                 errors.append(error)
                 raise

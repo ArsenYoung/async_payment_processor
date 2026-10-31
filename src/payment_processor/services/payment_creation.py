@@ -52,8 +52,9 @@ class CreatePaymentUseCase:
                 idempotency_key=command.idempotency_key,
                 webhook_url=command.webhook_url,
             )
-            repository.set_event_payload(build_payment_created_payload(payment))
-            return await repository.save_with_outbox(payment)
+            return await repository.save_with_outbox(
+                payment, event_payload=build_payment_created_payload(payment)
+            )
 
     async def _recover(
         self, command: CreatePaymentCommand, error: IdempotencyKeyViolationError

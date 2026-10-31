@@ -20,7 +20,6 @@ from payment_processor.domain.payment import Payment
 class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self._event_payload: dict[str, object] | None = None
 
     async def claim_lease(
         self, payment_id: UUID, operation: LeaseOperation, token: UUID, seconds: float
@@ -74,9 +73,6 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
             .execution_options(synchronize_session=False)
         )
 
-    def set_event_payload(self, payload: dict[str, object]) -> None:
-        self._event_payload = payload
-
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
         model = await self.session.get(PaymentModel, payment_id)
         return to_domain(model) if model is not None else None
@@ -106,9 +102,9 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
         payment.mark_webhook_delivered()
         await self.save(payment)
 
-    async def save_with_outbox(self, payment: PaymentInput) -> Payment:
-        if self._event_payload is None:
-            raise ValueError("Event payload is required")
+    async def save_with_outbox(
+        self, payment: PaymentInput, *, event_payload: dict[str, object]
+    ) -> Payment:
         if not isinstance(payment, Payment):
             payment = Payment(
                 id=payment.id,
@@ -127,7 +123,7 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
             Outbox(
                 payment_id=payment.id,
                 event_type=OutboxEventType.PAYMENT_CREATED,
-                payload=self._event_payload,
+                payload=event_payload,
             )
         )
         return to_domain(model)
