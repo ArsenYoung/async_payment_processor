@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.application.outbox_service import PublicationResult
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import settings
@@ -29,7 +30,6 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import ATTEMPT_HEADER, RetryAttempt
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.application.outbox_service import PublicationResult
 
 
 @pytest.fixture(autouse=True)
@@ -105,7 +105,9 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
                 outbox_database.session_scope, RabbitEventPublisher(routing_broker)
             ).publish_batch(10) == PublicationResult(1, 0)
             await wait_for_log(caplog, "consume", "completed")
-            await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
+            await RabbitEventPublisher(routing_broker).publish_payment_created(
+                retry_event, timeout=5.0
+            )
             await wait_for_log(caplog, "consume", "completed", 2)
 
     captured = entries(caplog)
@@ -178,7 +180,9 @@ async def test_real_dlq_logs_exhaustion_and_preserves_event_context(
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     async with WebhookClient(timeout=1) as webhook:
         async with retry_consumer(service, webhook):
-            await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
+            await RabbitEventPublisher(routing_broker).publish_payment_created(
+                retry_event, timeout=5.0
+            )
             await wait_for_log(caplog, "dlq_publish", "published")
     captured = entries(caplog)
     dead = [entry for entry in captured if entry.get("operation") == "dlq_publish"]
@@ -344,7 +348,9 @@ async def test_transfer_result_is_logged_after_broker_confirmation(
     retry: RetryAttempt | None,
     confirmed: bool,
 ) -> None:
-    await RabbitEventPublisher(routing_broker).publish_payment_created(retry_event, timeout=5.0)
+    await RabbitEventPublisher(routing_broker).publish_payment_created(
+        retry_event, timeout=5.0
+    )
     queue = await routing_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
     incoming = await queue.get(timeout=2)
     received = asyncio.Event()

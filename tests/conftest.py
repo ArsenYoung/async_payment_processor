@@ -18,6 +18,7 @@ from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.main import create_app
 from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.db.models import Outbox, Payment
@@ -31,7 +32,6 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.application.payment_service import PaymentService
 
 
 @pytest_asyncio.fixture

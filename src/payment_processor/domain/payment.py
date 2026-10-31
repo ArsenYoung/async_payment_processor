@@ -6,7 +6,6 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-
 from payment_processor.domain.validation import (
     validate_amount,
     validate_idempotency_key,

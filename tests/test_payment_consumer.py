@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
@@ -32,7 +33,6 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.application.payment_service import PaymentService
 
 
 @pytest.fixture(autouse=True)
@@ -595,7 +595,9 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
                 try:
                     await topology.declare_payment_topology(broker)
                     await broker.start()
-                    await RabbitEventPublisher(broker).publish_payment_created(saved_event, timeout=5.0)
+                    await RabbitEventPublisher(broker).publish_payment_created(
+                        saved_event, timeout=5.0
+                    )
                     async with asyncio.timeout(5):
                         while True:
                             async with outbox_database.session_scope() as session:

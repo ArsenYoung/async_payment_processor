@@ -185,14 +185,22 @@ async def test_each_application_protects_added_routes(
         ("/docs/oauth2-redirect", "text/html"),
     ],
 )
-@pytest.mark.parametrize("api_key", [None, "wrong-api-key", "valid"], ids=["anonymous", "wrong", "authorized"])
+@pytest.mark.parametrize(
+    "api_key",
+    [None, "wrong-api-key", "valid"],
+    ids=["anonymous", "wrong", "authorized"],
+)
 async def test_each_application_protects_documentation(
     applications: tuple[FastAPI, FastAPI],
     path: str,
     content_type: str,
     api_key: str | None,
 ) -> None:
-    headers = {} if api_key is None else {"X-API-Key": settings.api_key if api_key == "valid" else api_key}
+    headers = (
+        {}
+        if api_key is None
+        else {"X-API-Key": settings.api_key if api_key == "valid" else api_key}
+    )
     for application in applications:
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
@@ -222,7 +230,9 @@ async def test_each_application_documents_api_key_authorization(
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
         ) as client:
-            response = await client.get("/openapi.json", headers={"X-API-Key": settings.api_key})
+            response = await client.get(
+                "/openapi.json", headers={"X-API-Key": settings.api_key}
+            )
 
         assert response.status_code == 200
         schema = response.json()
@@ -266,9 +276,12 @@ async def test_each_application_uses_validation_error_handler(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["/docs", "/redoc"])
 async def test_documentation_embeds_schema_without_unauthenticated_fetch(
-    applications: tuple[FastAPI, FastAPI], path: str,
+    applications: tuple[FastAPI, FastAPI],
+    path: str,
 ) -> None:
-    async with AsyncClient(transport=ASGITransport(app=applications[0]), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=applications[0]), base_url="http://test"
+    ) as client:
         response = await client.get(path, headers={"X-API-Key": settings.api_key})
     assert response.status_code == 200
     assert '"/api/v1/payments"' in response.text

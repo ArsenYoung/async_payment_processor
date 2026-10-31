@@ -11,18 +11,18 @@ from payment_processor.application.errors import (
     IdempotencyKeyViolationError,
     PaymentNotFoundError,
 )
-from payment_processor.application.results import (
-    PaymentCreatedResult,
-    PaymentDetailsResult,
-)
-from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.application.payment_creation import (
     CreatePaymentUseCase,
     IdempotencyConflictError,
 )
 from payment_processor.application.payment_lookup import GetPaymentUseCase
 from payment_processor.application.payment_processing import ProcessPaymentUseCase
+from payment_processor.application.results import (
+    PaymentCreatedResult,
+    PaymentDetailsResult,
+)
 from payment_processor.application.webhook_delivery import DeliverPaymentWebhookUseCase
+from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
 
 
 def store_scope(repository: object) -> object:
@@ -465,7 +465,8 @@ async def test_external_deadline_releases_lease(
     ],
 )
 async def test_creation_rejects_invalid_command_before_opening_store(
-    field: str, value: object,
+    field: str,
+    value: object,
 ) -> None:
     from dataclasses import replace
     from unittest.mock import Mock

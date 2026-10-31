@@ -42,7 +42,9 @@ async def payment_lease(
                     await asyncio.sleep(LEASE_POLL_INTERVAL)
         except TimeoutError as error:
             if wait.expired():
-                raise LeaseBusyError(f"Payment {operation} lease wait expired") from error
+                raise LeaseBusyError(
+                    f"Payment {operation} lease wait expired"
+                ) from error
             raise
         yield payment, token if claimed else None
     finally:

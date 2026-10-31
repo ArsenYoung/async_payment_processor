@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue, field_val
 from payment_processor.domain.events import OutboxEventType as OutboxEventType
 from payment_processor.domain.payment import PaymentCurrency
 from payment_processor.domain.validation import (
-    AMOUNT_MAX_DIGITS, AMOUNT_DECIMAL_PLACES, WEBHOOK_URL_MAX_LENGTH,
+    AMOUNT_DECIMAL_PLACES,
+    AMOUNT_MAX_DIGITS,
+    WEBHOOK_URL_MAX_LENGTH,
 )
 
 
@@ -44,7 +46,9 @@ class PaymentCreatedPayload(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     payment_id: UUID
-    amount: Decimal = Field(gt=0, max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMAL_PLACES)
+    amount: Decimal = Field(
+        gt=0, max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMAL_PLACES
+    )
     currency: PaymentCurrency
     description: str = Field(min_length=1, max_length=500)
     metadata: dict[str, JsonValue]

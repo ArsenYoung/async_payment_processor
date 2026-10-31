@@ -90,8 +90,12 @@ def test_consumer_broker_uses_prefetch_without_disabling_publisher_confirms(
 async def test_payment_event_reaches_queue_with_persistent_delivery_and_stable_id(
     isolated_broker: RabbitBroker, payment_event: PaymentCreatedEvent
 ) -> None:
-    await RabbitEventPublisher(isolated_broker).publish_payment_created(payment_event, timeout=5.0)
-    await RabbitEventPublisher(isolated_broker).publish_payment_created(payment_event, timeout=5.0)
+    await RabbitEventPublisher(isolated_broker).publish_payment_created(
+        payment_event, timeout=5.0
+    )
+    await RabbitEventPublisher(isolated_broker).publish_payment_created(
+        payment_event, timeout=5.0
+    )
 
     queue = await isolated_broker.declare_queue(topology.PAYMENTS_NEW_QUEUE)
     for _ in range(2):
@@ -118,7 +122,9 @@ async def test_topology_can_be_declared_again_from_another_connection(
         await second_broker.connect()
         await declare_payment_topology(second_broker)
         await declare_payment_topology(second_broker)
-        await RabbitEventPublisher(second_broker).publish_payment_created(payment_event, timeout=5.0)
+        await RabbitEventPublisher(second_broker).publish_payment_created(
+            payment_event, timeout=5.0
+        )
     finally:
         await second_broker.stop()
 
@@ -138,7 +144,9 @@ async def test_unroutable_payment_event_raises_publish_error(
     await queue.unbind(exchange, routing_key="payment.created", timeout=5)
 
     with pytest.raises(PublishError):
-        await RabbitEventPublisher(isolated_broker).publish_payment_created(payment_event, timeout=5.0)
+        await RabbitEventPublisher(isolated_broker).publish_payment_created(
+            payment_event, timeout=5.0
+        )
 
     assert await queue.get(fail=False, timeout=5) is None
 
@@ -152,7 +160,9 @@ async def test_missing_or_negative_confirmation_is_rejected(
     broker.publish = AsyncMock(return_value=confirmation)
 
     with pytest.raises(RuntimeError, match="did not acknowledge"):
-        await RabbitEventPublisher(broker).publish_payment_created(payment_event, timeout=5.0)
+        await RabbitEventPublisher(broker).publish_payment_created(
+            payment_event, timeout=5.0
+        )
 
 
 @pytest.mark.asyncio
@@ -171,7 +181,9 @@ async def test_publication_errors_propagate(
     broker.publish = AsyncMock(side_effect=error)
 
     with pytest.raises(type(error)) as caught:
-        await RabbitEventPublisher(broker).publish_payment_created(payment_event, timeout=5.0)
+        await RabbitEventPublisher(broker).publish_payment_created(
+            payment_event, timeout=5.0
+        )
 
     assert caught.value is error
 
@@ -192,6 +204,8 @@ async def test_publication_wait_is_bounded(payment_event: PaymentCreatedEvent) -
 
     async with asyncio.timeout(1):
         with pytest.raises(TimeoutError):
-            await RabbitEventPublisher(broker).publish_payment_created(payment_event, timeout=0.01)
+            await RabbitEventPublisher(broker).publish_payment_created(
+                payment_event, timeout=0.01
+            )
 
     assert cancelled.is_set()

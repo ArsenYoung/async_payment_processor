@@ -20,6 +20,7 @@ from sqlalchemy.exc import OperationalError
 
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.application.errors import LeaseBusyError
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
@@ -34,7 +35,6 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.application.payment_service import PaymentService
 
 
 @pytest.fixture(autouse=True)
@@ -468,7 +468,9 @@ async def test_real_retry_waits_then_returns_persistent_event(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [TimeoutError, LeaseBusyError])
 async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
-    routing_broker: RabbitBroker, payment_event: PaymentCreatedEvent, error_type: type[TimeoutError],
+    routing_broker: RabbitBroker,
+    payment_event: PaymentCreatedEvent,
+    error_type: type[TimeoutError],
 ) -> None:
     service = Mock(spec=PaymentService)
     calls = []
@@ -485,7 +487,9 @@ async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
         retry_policy=RetryPolicy(base_delay=0.1),
     )
     await routing_broker.start()
-    await RabbitEventPublisher(routing_broker).publish_payment_created(payment_event, timeout=5.0)
+    await RabbitEventPublisher(routing_broker).publish_payment_created(
+        payment_event, timeout=5.0
+    )
     message = await receive(routing_broker, topology.dead_letter_queue())
     async with message.process():
         assert PaymentCreatedEvent.model_validate_json(message.body) == payment_event

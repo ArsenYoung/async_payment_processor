@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.application.outbox_service import PublicationResult
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
 from payment_processor.db.session import Database
@@ -24,7 +25,6 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.application.outbox_service import PublicationResult
 
 
 @pytest_asyncio.fixture

@@ -33,11 +33,23 @@ def test_idempotency_key_accepts_limit() -> None:
     assert validate_idempotency_key("a" * 255) == "a" * 255
 
 
-@pytest.mark.parametrize("url", ["", "ftp://example.com", "example.com", "https://example.com:invalid", "https://example.com/" + "a" * 2048])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "",
+        "ftp://example.com",
+        "example.com",
+        "https://example.com:invalid",
+        "https://example.com/" + "a" * 2048,
+    ],
+)
 def test_webhook_url_rejects_invalid_values(url: str) -> None:
     with pytest.raises(ValueError):
         validate_webhook_url(url)
 
 
 def test_webhook_url_accepts_http() -> None:
-    assert validate_webhook_url("http://example.com/payment") == "http://example.com/payment"
+    assert (
+        validate_webhook_url("http://example.com/payment")
+        == "http://example.com/payment"
+    )

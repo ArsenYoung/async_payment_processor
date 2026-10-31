@@ -32,4 +32,3 @@ class PaymentRecord(Protocol):
     created_at: datetime
     processed_at: datetime | None
     webhook_delivered_at: datetime | None
-

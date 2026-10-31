@@ -4,12 +4,12 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from payment_processor.application.payment_events import build_payment_created_payload
 from payment_processor.db.models import Outbox, Payment
-from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.db.repositories.factories import payment_repository_scope
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
-from payment_processor.application.payment_events import build_payment_created_payload
 
 
 @pytest.mark.asyncio

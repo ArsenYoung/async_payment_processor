@@ -3,7 +3,11 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from uuid import uuid4
 
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.application.payment_events import build_payment_created_payload
+from payment_processor.application.payment_rules import matches_create_command
+from payment_processor.application.ports import PaymentCreationStore
 from payment_processor.application.results import PaymentCreatedResult
 from payment_processor.domain.payment import Payment, PaymentCurrency
 from payment_processor.domain.validation import (
@@ -11,10 +15,6 @@ from payment_processor.domain.validation import (
     validate_idempotency_key,
     validate_webhook_url,
 )
-from payment_processor.application.commands import CreatePaymentCommand
-from payment_processor.application.payment_events import build_payment_created_payload
-from payment_processor.application.payment_rules import matches_create_command
-from payment_processor.application.ports import PaymentCreationStore
 
 logger = logging.getLogger(__name__)
 
@@ -74,4 +74,3 @@ class CreatePaymentUseCase:
         if not matches_create_command(payment, command):
             raise IdempotencyConflictError
         return payment
-

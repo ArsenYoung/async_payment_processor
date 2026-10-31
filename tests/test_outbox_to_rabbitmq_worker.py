@@ -15,8 +15,13 @@ from sqlalchemy.exc import (
     ProgrammingError,
 )
 
+from payment_processor.application import outbox_service as outbox_module
 from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.application.outbox_service import (
+    OutboxService,
+    PublicationResult,
+)
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import Settings
@@ -28,8 +33,6 @@ from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
-from payment_processor.application import outbox_service as outbox_module
-from payment_processor.application.outbox_service import OutboxService, PublicationResult
 
 
 @pytest.fixture

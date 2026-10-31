@@ -159,4 +159,3 @@ async def publish_failed_payment(
             "duration_ms": (perf_counter() - started) * 1000,
         },
     )
-

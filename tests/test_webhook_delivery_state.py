@@ -428,7 +428,8 @@ async def test_webhook_lease_expiry_allows_restart_and_fences_old_owner(
 
 @pytest.mark.asyncio
 async def test_accepted_webhook_before_failed_commit_repeats_same_delivery_id(
-    outbox_database: Database, completed_payment: Payment,
+    outbox_database: Database,
+    completed_payment: Payment,
 ) -> None:
     from contextlib import asynccontextmanager
 
@@ -453,14 +454,22 @@ async def test_accepted_webhook_before_failed_commit_repeats_same_delivery_id(
                 event.listen(session.sync_session, "before_commit", fail_commit)
             yield session
 
-    async with WebhookClient(timeout=1, transport=httpx.MockTransport(receive)) as sender:
+    async with WebhookClient(
+        timeout=1, transport=httpx.MockTransport(receive)
+    ) as sender:
         with pytest.raises(RuntimeError, match="delivery commit failed"):
-            await create_payment_service(scope).deliver_webhook(completed_payment.id, sender)
+            await create_payment_service(scope).deliver_webhook(
+                completed_payment.id, sender
+            )
     async with outbox_database.session_scope() as session:
         saved = await session.get(Payment, completed_payment.id)
         assert saved.webhook_delivered_at is None
-    async with WebhookClient(timeout=1, transport=httpx.MockTransport(receive)) as sender:
-        await create_payment_service(outbox_database.session_scope).deliver_webhook(completed_payment.id, sender)
+    async with WebhookClient(
+        timeout=1, transport=httpx.MockTransport(receive)
+    ) as sender:
+        await create_payment_service(outbox_database.session_scope).deliver_webhook(
+            completed_payment.id, sender
+        )
     assert len(requests) == 2
     assert effects == {str(completed_payment.id)}
     assert requests[0].content == requests[1].content

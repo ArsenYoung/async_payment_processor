@@ -4,9 +4,13 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html, get_swagger_ui_oauth2_redirect_html
-from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.docs import (
+    get_redoc_html,
+    get_swagger_ui_html,
+    get_swagger_ui_oauth2_redirect_html,
+)
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.api.dependencies import require_api_key
@@ -62,7 +66,8 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.add_api_route("/docs", swagger_documentation, include_in_schema=False)
     application.add_api_route("/redoc", redoc_documentation, include_in_schema=False)
     application.add_api_route(
-        "/docs/oauth2-redirect", get_swagger_ui_oauth2_redirect_html,
+        "/docs/oauth2-redirect",
+        get_swagger_ui_oauth2_redirect_html,
         include_in_schema=False,
     )
     return application
@@ -82,19 +87,25 @@ def embedded_schema(request: Request) -> str:
 
 async def swagger_documentation(request: Request) -> HTMLResponse:
     response = get_swagger_ui_html(openapi_url="/openapi.json", title="Payment API")
-    html = bytes(response.body).decode().replace(
-        "url: '/openapi.json',", f"spec: {embedded_schema(request)},"
+    html = (
+        bytes(response.body)
+        .decode()
+        .replace("url: '/openapi.json',", f"spec: {embedded_schema(request)},")
     )
     return HTMLResponse(html)
 
 
 async def redoc_documentation(request: Request) -> HTMLResponse:
     response = get_redoc_html(openapi_url="/openapi.json", title="Payment API")
-    html = bytes(response.body).decode().replace(
-        '<redoc spec-url="/openapi.json"></redoc>', '<div id="redoc"></div>'
-    ).replace(
-        "</body>",
-        f'<script>Redoc.init({embedded_schema(request)}, {{}}, document.getElementById("redoc"));</script></body>',
+    html = (
+        bytes(response.body)
+        .decode()
+        .replace('<redoc spec-url="/openapi.json"></redoc>', '<div id="redoc"></div>')
+        .replace(
+            "</body>",
+            f"<script>Redoc.init({embedded_schema(request)}, {{}}, "
+            'document.getElementById("redoc"));</script></body>',
+        )
     )
     return HTMLResponse(html)
 

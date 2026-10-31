@@ -2,8 +2,8 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from uuid import UUID
 
-from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.application.ports import PaymentReader
+from payment_processor.application.results import PaymentDetailsResult
 
 
 class GetPaymentUseCase:
