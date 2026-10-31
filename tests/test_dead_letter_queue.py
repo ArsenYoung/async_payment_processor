@@ -12,6 +12,9 @@ from aio_pika.exceptions import PublishError
 from faststream.rabbit import RabbitBroker
 from sqlalchemy import select
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, PaymentStatus
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
@@ -20,9 +23,6 @@ from payment_processor.messaging.schemas import (
     PaymentCreatedEvent,
     PaymentResultPayload,
 )
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
 
 
 async def receive_dead_letter(broker: RabbitBroker) -> AbstractIncomingMessage:
@@ -46,7 +46,7 @@ async def test_webhook_exhaustion_preserves_result_and_dead_letter_diagnostics(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     call_times: list[float] = []
     initial = await service.get_payment(retry_event.payload.payment_id)
@@ -172,7 +172,7 @@ async def test_failed_transfer_recovers_original_without_repeating_gateway(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     transfer_errors: list[Exception] = []
     definition = (

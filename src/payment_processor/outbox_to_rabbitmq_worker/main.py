@@ -4,7 +4,9 @@ import logging
 from payment_processor.core.config import settings
 from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
+from payment_processor.db.repositories.factories import outbox_repository_scope
 from payment_processor.db.session import Database
+from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.topology import declare_payment_topology
@@ -25,7 +27,9 @@ async def _publish() -> None:
             configure_library_logging()
             await declare_payment_topology(broker)
             service = OutboxService(
-                database.session_scope, RabbitEventPublisher(broker)
+                outbox_repository_scope(database.session_scope),
+                RabbitEventPublisher(broker),
+                queue_name=topology.PAYMENTS_NEW_QUEUE.name,
             )
             logging.getLogger(__name__).info(
                 "Outbox publisher ready", extra={"outcome": "ready"}

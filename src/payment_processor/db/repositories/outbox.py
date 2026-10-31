@@ -4,10 +4,12 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.application.events import OutboxRecord
+from payment_processor.application.ports import OutboxStore
 from payment_processor.db.models import Outbox
 
 
-class OutboxRepository:
+class SqlAlchemyOutboxRepository(OutboxStore):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
@@ -30,7 +32,7 @@ class OutboxRepository:
         )
         return list(result.all())
 
-    async def mark_published(self, event: Outbox) -> None:
+    async def mark_published(self, event: OutboxRecord) -> None:
         event.published_at = datetime.now(UTC)
         event.attempts += 1
         event.last_error = None
@@ -38,14 +40,18 @@ class OutboxRepository:
         await self.session.flush()
 
     async def record_failure(
-        self, event: Outbox, error: str, *, next_attempt_at: datetime | None = None
+        self,
+        event: OutboxRecord,
+        error: str,
+        *,
+        next_attempt_at: datetime | None = None,
     ) -> None:
         event.attempts += 1
         event.last_error = error
         event.next_attempt_at = next_attempt_at
         await self.session.flush()
 
-    async def quarantine(self, event: Outbox, error: str) -> None:
+    async def quarantine(self, event: OutboxRecord, error: str) -> None:
         event.attempts += 1
         event.last_error = error
         event.quarantined_at = datetime.now(UTC)
@@ -63,3 +69,6 @@ class OutboxRepository:
         event.quarantined_at = None
         event.next_attempt_at = None
         await self.session.flush()
+
+
+OutboxRepository = SqlAlchemyOutboxRepository

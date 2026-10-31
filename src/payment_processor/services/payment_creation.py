@@ -3,11 +3,9 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from uuid import uuid4
 
-from sqlalchemy.exc import IntegrityError
-
+from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.application.records import NewPayment, PaymentRecord
 from payment_processor.application.results import PaymentCreatedResult
-from payment_processor.db.models import Payment
-from payment_processor.db.repositories.payments import is_idempotency_key_violation
 from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload
@@ -36,16 +34,16 @@ class CreatePaymentUseCase:
         WebhookUrl(command.webhook_url)
         try:
             payment = await self._create(command)
-        except IntegrityError as error:
+        except IdempotencyKeyViolationError as error:
             payment = await self._recover(command, error)
         return PaymentCreatedResult.from_payment(payment)
 
-    async def _create(self, command: CreatePaymentCommand) -> Payment:
+    async def _create(self, command: CreatePaymentCommand) -> PaymentRecord:
         async with self._store_scope_factory() as repository:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is not None:
                 return self._reuse(existing, command)
-            payment = Payment(
+            payment = NewPayment(
                 id=uuid4(),
                 amount=command.amount,
                 currency=command.currency,
@@ -58,17 +56,17 @@ class CreatePaymentUseCase:
             return await repository.save_with_outbox(payment)
 
     async def _recover(
-        self, command: CreatePaymentCommand, error: IntegrityError
-    ) -> Payment:
-        if not is_idempotency_key_violation(error):
-            raise error
+        self, command: CreatePaymentCommand, error: IdempotencyKeyViolationError
+    ) -> PaymentRecord:
         async with self._store_scope_factory() as repository:
             existing = await repository.find_by_idempotency_key(command.idempotency_key)
             if existing is None:
                 raise error
             return self._reuse(existing, command)
 
-    def _reuse(self, payment: Payment, command: CreatePaymentCommand) -> Payment:
+    def _reuse(
+        self, payment: PaymentRecord, command: CreatePaymentCommand
+    ) -> PaymentRecord:
         if not matches_create_command(payment, command):
             raise IdempotencyConflictError
         return payment

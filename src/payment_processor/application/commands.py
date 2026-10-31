@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from payment_processor.db.models.payment import PaymentCurrency
+from payment_processor.domain.payment import PaymentCurrency
 
 
 @dataclass(frozen=True, slots=True)

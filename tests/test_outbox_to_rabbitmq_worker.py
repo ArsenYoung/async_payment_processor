@@ -10,16 +10,13 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import (
-    DBAPIError,
-    DisconnectionError,
     IntegrityError,
-    InterfaceError,
-    OperationalError,
     ProgrammingError,
 )
-from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import Settings
 from payment_processor.db.models import Outbox
@@ -31,7 +28,6 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
 from payment_processor.services import outbox_service as outbox_module
 from payment_processor.services.outbox_service import OutboxService, PublicationResult
-from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.fixture
@@ -136,13 +132,7 @@ async def test_publisher_pauses_after_empty_successful_and_failed_batches(
 @pytest.mark.parametrize(
     "error",
     [
-        OperationalError("SELECT 1", {}, RuntimeError("Database unavailable")),
-        InterfaceError("SELECT 1", {}, RuntimeError("Connection lost")),
-        DBAPIError(
-            "SELECT 1", {}, RuntimeError("Disconnected"), connection_invalidated=True
-        ),
-        DisconnectionError("Pool disconnected"),
-        DatabaseTimeoutError("Pool exhausted"),
+        PersistenceUnavailableError("Database unavailable"),
         ConnectionError("Database connection refused"),
         TimeoutError("Database connection timed out"),
     ],
@@ -231,6 +221,8 @@ def publisher_runtime(
     database_factory = Mock(return_value=database)
     broker_factory = Mock(return_value=broker)
     service_factory = Mock(return_value=service)
+    store_scope = Mock()
+    store_scope_factory = Mock(return_value=store_scope)
     declare = AsyncMock()
     operations = Mock()
     operations.attach_mock(database, "database")
@@ -251,6 +243,7 @@ def publisher_runtime(
     monkeypatch.setattr(publisher_main, "Database", database_factory)
     monkeypatch.setattr(publisher_main, "create_broker", broker_factory)
     monkeypatch.setattr(publisher_main, "OutboxService", service_factory)
+    monkeypatch.setattr(publisher_main, "outbox_repository_scope", store_scope_factory)
     monkeypatch.setattr(publisher_main, "declare_payment_topology", declare)
     monkeypatch.setattr(
         publisher_main,
@@ -269,6 +262,8 @@ def publisher_runtime(
         database_factory=database_factory,
         broker_factory=broker_factory,
         service_factory=service_factory,
+        store_scope=store_scope,
+        store_scope_factory=store_scope_factory,
         declare=declare,
         operations=operations,
         entered=entered,
@@ -300,8 +295,13 @@ async def test_publisher_stops_publisher_before_closing_broker_and_database(
         call.broker.stop(),
         call.database.dispose(),
     ]
-    session_scope, publisher = runtime.service_factory.call_args.args
-    assert session_scope is runtime.database.session_scope
+    store_scope, publisher = runtime.service_factory.call_args.args
+    assert store_scope is runtime.store_scope
+    runtime.store_scope_factory.assert_called_once_with(runtime.database.session_scope)
+    assert (
+        runtime.service_factory.call_args.kwargs["queue_name"]
+        == topology.PAYMENTS_NEW_QUEUE.name
+    )
     assert isinstance(publisher, RabbitEventPublisher)
     assert publisher._broker is runtime.broker
     _assert_signal_cleanup(runtime.signals)
@@ -444,7 +444,7 @@ async def test_running_publisher_publishes_new_payment_automatically(
                 try:
                     async with asyncio.timeout(5):
                         await started.wait()
-                        service = PaymentService(outbox_database.session_scope)
+                        service = create_payment_service(outbox_database.session_scope)
                         payment = await service.create_payment(
                             PaymentCreateRequest.model_validate(payment_payload),
                             f"test-lifecycle-{uuid4()}",

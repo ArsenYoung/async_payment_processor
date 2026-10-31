@@ -5,11 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from payment_processor.application.ports import (
+    PaymentRepository as PaymentRepositoryPort,
+)
+from payment_processor.application.records import PaymentInput, PaymentRecord
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.services.payment_rules import can_deliver_webhook
 
 
-class PaymentRepository:
+class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self._event_payload: dict[str, object] | None = None
@@ -32,16 +36,26 @@ class PaymentRepository:
         )
         return result.scalar_one_or_none()
 
-    async def mark_webhook_delivered(self, payment: Payment) -> None:
+    async def mark_webhook_delivered(self, payment: PaymentRecord) -> None:
         if not can_deliver_webhook(payment.status, payment.processed_at):
             raise ValueError("Webhook delivery requires a completed payment")
         if payment.webhook_delivered_at is None:
             payment.webhook_delivered_at = datetime.now(UTC)
             await self.session.flush()
 
-    async def save_with_outbox(self, payment: Payment) -> Payment:
+    async def save_with_outbox(self, payment: PaymentInput) -> PaymentRecord:
         if self._event_payload is None:
             raise ValueError("Event payload is required")
+        if not isinstance(payment, Payment):
+            payment = Payment(
+                id=payment.id,
+                amount=payment.amount,
+                currency=payment.currency,
+                description=payment.description,
+                payment_metadata=payment.payment_metadata,
+                idempotency_key=payment.idempotency_key,
+                webhook_url=payment.webhook_url,
+            )
         self.session.add(payment)
         await self.session.flush()
         await self.session.refresh(payment)
@@ -53,6 +67,9 @@ class PaymentRepository:
             )
         )
         return payment
+
+
+PaymentRepository = SqlAlchemyPaymentRepository
 
 
 def is_idempotency_key_violation(error: IntegrityError) -> bool:

@@ -16,16 +16,14 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
+from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.errors import PaymentNotFoundError
+from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.session import Database
-from payment_processor.services.errors import (
-    PaymentNotFoundError,
-    is_retryable_processing_error,
-)
-from payment_processor.services.payment_gateway_simulator import PaymentGatewaySimulator
-from payment_processor.services.payment_service import PaymentService
-from payment_processor.services.webhooks import WebhookClient
+from payment_processor.messaging.errors import is_retryable_processing_error
 
 
 @pytest.mark.parametrize(
@@ -122,7 +120,7 @@ async def test_missing_payment_has_explicit_non_retryable_error(
     payment_id = uuid4()
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     webhook = AsyncMock(spec=WebhookClient)
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
 
     with pytest.raises(PaymentNotFoundError) as caught:
         if operation == "process_payment":
@@ -143,7 +141,7 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
     outbox_database: Database, payment_payload: dict
 ) -> None:
     gateway = PaymentGatewaySimulator(random_value=lambda: 1.0, sleep=AsyncMock())
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
     )
@@ -182,7 +180,7 @@ async def test_retryable_gateway_error_preserves_pending_payment(
     )
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.side_effect = error
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
     )
@@ -212,7 +210,7 @@ async def test_retryable_webhook_error_preserves_gateway_result(
 ) -> None:
     gateway = AsyncMock(spec=PaymentGatewaySimulator)
     gateway.process.return_value = status
-    service = PaymentService(outbox_database.session_scope, gateway=gateway)
+    service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
     )

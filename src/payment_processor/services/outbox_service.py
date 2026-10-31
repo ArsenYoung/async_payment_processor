@@ -6,20 +6,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 
-from sqlalchemy.exc import (
-    DBAPIError,
-    DisconnectionError,
-    InterfaceError,
-    OperationalError,
-)
-from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.application.events import PaymentCreatedEvent
+from payment_processor.application.ports import EventPublisher, OutboxStore
 from payment_processor.core.logging import processing_fields
-from payment_processor.db.repositories.outbox import OutboxRepository
-from payment_processor.messaging import topology
-from payment_processor.messaging.schemas import PaymentCreatedEvent
-from payment_processor.services.ports import EventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +23,14 @@ class PublicationResult:
 class OutboxService:
     def __init__(
         self,
-        session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
+        store_scope_factory: Callable[[], AbstractAsyncContextManager[OutboxStore]],
         publisher: EventPublisher,
-        repository_factory: Callable[
-            [AsyncSession], OutboxRepository
-        ] = OutboxRepository,
+        *,
+        queue_name: str | None = None,
     ) -> None:
-        self._session_scope_factory = session_scope_factory
+        self._store_scope_factory = store_scope_factory
         self._publisher = publisher
-        self._repository_factory = repository_factory
+        self._queue_name = queue_name
 
     async def run(
         self, *, batch_size: int, poll_interval: float, publish_timeout: float
@@ -49,17 +38,7 @@ class OutboxService:
         while True:
             try:
                 result = await self.publish_batch(batch_size, timeout=publish_timeout)
-            except (
-                DBAPIError,
-                DisconnectionError,
-                DatabaseTimeoutError,
-                OSError,
-            ) as error:
-                if isinstance(error, DBAPIError) and not (
-                    error.connection_invalidated
-                    or isinstance(error, (OperationalError, InterfaceError))
-                ):
-                    raise
+            except (PersistenceUnavailableError, OSError) as error:
                 logger.exception(
                     "Outbox database unavailable; retrying after pause",
                     extra=processing_fields(
@@ -88,8 +67,7 @@ class OutboxService:
         results: list[tuple[dict[str, object], Exception | None]] = []
         context: dict[str, object] = {"operation": "outbox_poll"}
         try:
-            async with self._session_scope_factory() as session:
-                repository = self._repository_factory(session)
+            async with self._store_scope_factory() as repository:
                 events = await repository.fetch_unpublished(limit)
                 for record in events:
                     started = perf_counter()
@@ -97,7 +75,7 @@ class OutboxService:
                         operation="outbox_publish",
                         payment_id=str(record.payment_id),
                         event_id=str(record.id),
-                        queue=topology.PAYMENTS_NEW_QUEUE.name,
+                        queue=self._queue_name,
                         publication_attempt=record.attempts + 1,
                     )
                     failure: Exception | None = None

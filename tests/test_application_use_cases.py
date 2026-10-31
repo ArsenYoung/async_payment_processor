@@ -6,15 +6,17 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.application.errors import (
+    IdempotencyKeyViolationError,
+    PaymentNotFoundError,
+)
 from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
-from payment_processor.db.models import PaymentCurrency, PaymentStatus
-from payment_processor.services.errors import PaymentNotFoundError
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
 from payment_processor.services.payment_creation import (
     CreatePaymentUseCase,
     IdempotencyConflictError,
@@ -285,32 +287,45 @@ def test_details_result_is_a_snapshot_of_nested_metadata_and_state() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("unique_key", [False, True])
-async def test_create_recovers_only_idempotency_constraint_violation(
-    unique_key: bool,
+@pytest.mark.parametrize("conflict", [False, True])
+async def test_create_recovers_idempotency_violation(
+    conflict: bool,
 ) -> None:
     saved = payment()
+    command = command_for(saved)
+    if conflict:
+        saved.amount += Decimal("1")
     repository = AsyncMock()
     repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.side_effect = [None, saved]
-    cause = Exception("constraint violation")
-    cause.constraint_name = "uq_payments_idempotency_key" if unique_key else "other"
-    original = Exception("duplicate")
-    original.sqlstate = "23505"
-    original.__cause__ = cause
-    error = IntegrityError("INSERT", {}, original)
+    error = IdempotencyKeyViolationError()
     repository.save_with_outbox.side_effect = error
     use_case = CreatePaymentUseCase(lambda: store_scope(repository))
 
-    if unique_key:
-        result = await use_case.create(command_for(saved))
-        assert result == PaymentCreatedResult.from_payment(saved)
-        assert repository.find_by_idempotency_key.await_count == 2
+    if conflict:
+        with pytest.raises(IdempotencyConflictError):
+            await use_case.create(command)
     else:
-        with pytest.raises(IntegrityError) as caught:
-            await use_case.create(command_for(saved))
-        assert caught.value is error
-        assert repository.find_by_idempotency_key.await_count == 1
+        result = await use_case.create(command)
+        assert result == PaymentCreatedResult.from_payment(saved)
+    assert repository.find_by_idempotency_key.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_create_preserves_violation_when_payment_cannot_be_found() -> None:
+    repository = AsyncMock()
+    repository.set_event_payload = Mock()
+    repository.find_by_idempotency_key.return_value = None
+    error = IdempotencyKeyViolationError()
+    repository.save_with_outbox.side_effect = error
+
+    with pytest.raises(IdempotencyKeyViolationError) as caught:
+        await CreatePaymentUseCase(lambda: store_scope(repository)).create(
+            command_for(payment())
+        )
+
+    assert caught.value is error
+    assert repository.find_by_idempotency_key.await_count == 2
 
 
 @pytest.mark.asyncio

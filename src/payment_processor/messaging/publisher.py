@@ -3,11 +3,12 @@ import asyncio
 from faststream.rabbit import RabbitBroker
 from pamqp.commands import Basic
 
+from payment_processor.application.events import PaymentCreatedEvent
+from payment_processor.application.ports import EventPublisher
 from payment_processor.messaging import topology
-from payment_processor.messaging.schemas import PaymentCreatedEvent
 
 
-class RabbitEventPublisher:
+class RabbitEventPublisher(EventPublisher):
     def __init__(self, broker: RabbitBroker) -> None:
         self._broker = broker
 
