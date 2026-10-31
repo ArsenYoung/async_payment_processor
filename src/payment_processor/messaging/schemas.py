@@ -1,6 +1,6 @@
 import json
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from pydantic import (
@@ -14,12 +14,22 @@ from pydantic import (
 )
 
 from payment_processor.application.results import PaymentDetailsResult
-from payment_processor.db.models import (
-    Outbox,
-    OutboxEventType,
-    PaymentCurrency,
-    PaymentStatus,
-)
+from payment_processor.domain.events import OutboxEventType
+from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
+
+
+class OutboxEventRecord(Protocol):
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def payment_id(self) -> UUID: ...
+
+    @property
+    def event_type(self) -> OutboxEventType: ...
+
+    @property
+    def payload(self) -> dict[str, Any]: ...
 
 
 class PaymentCreatedPayload(BaseModel):
@@ -47,7 +57,7 @@ class PaymentCreatedEvent(BaseModel):
     payload: PaymentCreatedPayload
 
     @classmethod
-    def from_outbox(cls, outbox: Outbox) -> "PaymentCreatedEvent":
+    def from_outbox(cls, outbox: OutboxEventRecord) -> "PaymentCreatedEvent":
         event = cls.model_validate(
             {
                 "event_id": outbox.id,

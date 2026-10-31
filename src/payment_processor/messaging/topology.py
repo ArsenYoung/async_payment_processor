@@ -13,7 +13,7 @@ from faststream.rabbit.message import RabbitMessage
 from pamqp.commands import Basic
 
 from payment_processor.core.logging import processing_fields
-from payment_processor.db.models import OutboxEventType
+from payment_processor.domain.events import OutboxEventType
 from payment_processor.messaging.retry import (
     ATTEMPT_HEADER,
     RetryAttempt,
