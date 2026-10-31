@@ -147,7 +147,7 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
     )
-    result = await service.process_payment(payment.id)
+    result = await service.process_payment(payment.payment_id)
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -157,13 +157,13 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        await service.deliver_webhook(payment.id, webhook)
+        await service.deliver_webhook(payment.payment_id, webhook)
 
     assert result.status == PaymentStatus.FAILED
     assert len(requests) == 1
     assert json.loads(requests[0].content)["status"] == "failed"
     async with outbox_database.session_scope() as session:
-        saved = await session.get(Payment, payment.id)
+        saved = await session.get(Payment, payment.payment_id)
         assert saved is not None
         assert saved.status == PaymentStatus.FAILED
         assert saved.processed_at == result.processed_at is not None
@@ -188,13 +188,13 @@ async def test_retryable_gateway_error_preserves_pending_payment(
     )
 
     with pytest.raises(type(error)) as caught:
-        await service.process_payment(payment.id)
+        await service.process_payment(payment.payment_id)
 
     assert caught.value is error
     assert is_retryable_processing_error(caught.value)
     gateway.process.assert_awaited_once_with()
     async with outbox_database.session_scope() as session:
-        saved = await session.get(Payment, payment.id)
+        saved = await session.get(Payment, payment.payment_id)
         assert saved is not None
         assert saved.status == PaymentStatus.PENDING
         assert saved.processed_at is None
@@ -216,7 +216,7 @@ async def test_retryable_webhook_error_preserves_gateway_result(
     payment = await service.create_payment(
         PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
     )
-    result = await service.process_payment(payment.id)
+    result = await service.process_payment(payment.payment_id)
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -231,13 +231,13 @@ async def test_retryable_webhook_error_preserves_gateway_result(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
         with pytest.raises(httpx.HTTPError) as caught:
-            await service.deliver_webhook(payment.id, webhook)
+            await service.deliver_webhook(payment.payment_id, webhook)
 
     assert is_retryable_processing_error(caught.value)
     assert len(requests) == 1
     assert json.loads(requests[0].content)["status"] == status.value
     async with outbox_database.session_scope() as session:
-        saved = await session.get(Payment, payment.id)
+        saved = await session.get(Payment, payment.payment_id)
         assert saved is not None
         assert saved.status == status
         assert saved.processed_at == result.processed_at is not None

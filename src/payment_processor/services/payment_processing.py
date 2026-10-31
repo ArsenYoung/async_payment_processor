@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from time import perf_counter
 from uuid import UUID
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
-from payment_processor.db.models import Payment
 from payment_processor.services.errors import PaymentNotFoundError
 from payment_processor.services.payment_rules import can_process
 from payment_processor.services.ports import PaymentGateway, PaymentProcessingStore
@@ -25,7 +25,7 @@ class ProcessPaymentUseCase:
         self._store_scope_factory = store_scope_factory
         self._gateway = gateway
 
-    async def process(self, payment_id: UUID) -> Payment:
+    async def process(self, payment_id: UUID) -> PaymentDetailsResult:
         started = perf_counter()
         fields = processing_fields(
             payment_id=str(payment_id), operation="payment_process"
@@ -61,7 +61,7 @@ class ProcessPaymentUseCase:
                 "duration_ms": (perf_counter() - started) * 1000,
             },
         )
-        return payment
+        return PaymentDetailsResult.from_payment(payment)
 
 
 PaymentProcessingService = ProcessPaymentUseCase

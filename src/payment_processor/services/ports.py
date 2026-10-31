@@ -2,6 +2,7 @@ from collections.abc import Awaitable
 from typing import Protocol
 from uuid import UUID
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 
@@ -11,7 +12,7 @@ class PaymentGateway(Protocol):
 
 
 class WebhookSender(Protocol):
-    def send(self, payment: Payment) -> Awaitable[None]: ...
+    def send(self, payment: PaymentDetailsResult) -> Awaitable[None]: ...
 
 
 class EventPublisher(Protocol):

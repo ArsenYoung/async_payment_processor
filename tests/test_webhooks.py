@@ -9,6 +9,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.config import Settings
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.session import Database
@@ -68,8 +69,8 @@ async def test_webhook_posts_result_and_reuses_client(
     async with WebhookClient(
         timeout=2.5, transport=httpx.MockTransport(handle)
     ) as client:
-        await client.send(completed_payment)
-        await client.send(completed_payment)
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     assert len(requests) == 2
     for request in requests:
@@ -124,7 +125,9 @@ def test_webhook_payload_preserves_currency_and_decimal(
     completed_payment.currency = currency
     completed_payment.amount = Decimal("10.50")
 
-    payload = PaymentResultPayload.from_payment(completed_payment)
+    payload = PaymentResultPayload.from_result(
+        PaymentDetailsResult.from_payment(completed_payment)
+    )
 
     assert payload.model_dump(mode="json")["currency"] == currency.value
     assert payload.model_dump(mode="json")["amount"] == "10.50"
@@ -149,7 +152,7 @@ async def test_incomplete_result_is_rejected_before_sending(
         timeout=5.0, transport=httpx.MockTransport(handle)
     ) as client:
         with pytest.raises(ValidationError) as caught:
-            await client.send(completed_payment)
+            await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     assert caught.value.errors()[0]["loc"] == (field,)
     handle.assert_not_awaited()
@@ -170,7 +173,7 @@ async def test_non_success_response_propagates_without_redirect_or_retry(
         timeout=5.0, transport=httpx.MockTransport(handle)
     ) as client:
         with pytest.raises(httpx.HTTPStatusError) as caught:
-            await client.send(completed_payment)
+            await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     assert caught.value.response.status_code == status_code
     assert str(caught.value.request.url) == completed_payment.webhook_url
@@ -199,7 +202,7 @@ async def test_network_failure_propagates_without_retry(
         timeout=5.0, transport=httpx.MockTransport(handle)
     ) as client:
         with pytest.raises(error_type) as caught:
-            await client.send(completed_payment)
+            await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     assert caught.value is error
     handle.assert_awaited_once()
@@ -227,7 +230,7 @@ async def test_client_closes_transport_on_exit(
 
     async def send() -> None:
         async with client:
-            await client.send(completed_payment)
+            await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     if failure is None:
         await send()
@@ -238,7 +241,7 @@ async def test_client_closes_transport_on_exit(
 
     close.assert_awaited_once_with()
     with pytest.raises(RuntimeError, match="client has been closed"):
-        await client.send(completed_payment)
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
 
 @pytest.mark.asyncio
@@ -255,7 +258,7 @@ async def test_webhook_request_deadline_covers_slow_response_headers(
         transport=httpx.MockTransport(handle),
     ) as client:
         with pytest.raises(WebhookRequestTimeoutError):
-            await client.send(completed_payment)
+            await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
 
 @pytest.mark.asyncio
@@ -282,7 +285,7 @@ async def test_webhook_stream_does_not_consume_unused_large_response_body(
         request_deadline=1.0,
         transport=httpx.MockTransport(handle),
     ) as client:
-        await client.send(completed_payment)
+        await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
     assert response_stream.closed
 

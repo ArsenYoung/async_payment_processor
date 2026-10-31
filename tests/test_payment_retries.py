@@ -47,13 +47,13 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
     async def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         call_times.append(monotonic())
-        payment = await service.get_payment(initial.id)
+        payment = await service.get_payment(initial.payment_id)
         assert payment is not None
         assert payment.status == status
         assert payment.processed_at is not None
         assert payment.webhook_delivered_at is None
         assert str(request.url) == payment.webhook_url
-        assert json.loads(request.content) == PaymentResultPayload.from_payment(
+        assert json.loads(request.content) == PaymentResultPayload.from_result(
             payment
         ).model_dump(mode="json")
         if len(requests) < successful_attempt:
@@ -72,7 +72,7 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
             await topology.publish_payment_event(routing_broker, retry_event)
             async with asyncio.timeout(10):
                 while True:
-                    delivered = await service.get_payment(initial.id)
+                    delivered = await service.get_payment(initial.payment_id)
                     assert delivered is not None
                     if delivered.webhook_delivered_at is not None:
                         break

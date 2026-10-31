@@ -17,7 +17,6 @@ from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.db.models import (
     Outbox,
     OutboxEventType,
-    Payment,
     PaymentCurrency,
     PaymentStatus,
 )
@@ -78,10 +77,6 @@ class PaymentResultPayload(BaseModel):
     def validate_metadata(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
         json.dumps(value, allow_nan=False)
         return value
-
-    @classmethod
-    def from_payment(cls, payment: Payment) -> "PaymentResultPayload":
-        return cls.from_result(PaymentDetailsResult.from_payment(payment))
 
     @classmethod
     def from_result(cls, result: PaymentDetailsResult) -> "PaymentResultPayload":

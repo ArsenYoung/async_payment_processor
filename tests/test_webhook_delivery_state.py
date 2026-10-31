@@ -10,6 +10,7 @@ import pytest_asyncio
 from sqlalchemy import event, func, select
 from sqlalchemy.exc import OperationalError
 
+from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
@@ -225,7 +226,7 @@ async def test_webhook_failure_preserves_result_without_marking_delivery(
                 repository = PaymentRepository(session)
                 payment = await repository.find_by_id_for_update(completed_payment.id)
                 assert payment is not None
-                await client.send(payment)
+                await client.send(PaymentDetailsResult.from_payment(payment))
                 await repository.mark_webhook_delivered(payment)
 
     async with outbox_database.session_scope() as session:

@@ -62,7 +62,7 @@ async def saved_event(
     )
     async with outbox_database.session_scope() as session:
         outbox = await session.scalar(
-            select(Outbox).where(Outbox.payment_id == payment.id)
+            select(Outbox).where(Outbox.payment_id == payment.payment_id)
         )
         assert outbox is not None
         return PaymentCreatedEvent.from_outbox(outbox)

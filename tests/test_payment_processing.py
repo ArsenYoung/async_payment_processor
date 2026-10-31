@@ -48,13 +48,13 @@ async def test_processing_commits_gateway_result_before_returning(
     payment = await service.process_payment(pending_payment.id)
 
     gateway.process.assert_awaited_once_with()
-    assert payment.id == pending_payment.id
+    assert payment.payment_id == pending_payment.id
     assert payment.status == status
     assert payment.processed_at is not None
     assert started_at <= payment.processed_at <= datetime.now(UTC)
     assert payment.processed_at.utcoffset().total_seconds() == 0
     async with outbox_database.session_scope() as session:
-        saved = await session.get(Payment, payment.id)
+        saved = await session.get(Payment, payment.payment_id)
         assert saved is not None
         assert saved.status == status
         assert saved.processed_at == payment.processed_at
