@@ -1,16 +1,21 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from uuid import UUID
+from decimal import Decimal
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import event, func, select
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Mapper
+from sqlalchemy.orm import Mapper, Session
 
+from payment_processor.application.payment_events import build_payment_created_payload
 from payment_processor.db.models import Outbox, Payment
+from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import Payment as DomainPayment
+from payment_processor.domain.payment import PaymentCurrency
 
 pytestmark = pytest.mark.integration
 
@@ -92,3 +97,46 @@ def _fail_outbox_insert(idempotency_key: str) -> Iterator[list[UUID]]:
         yield failed_payment_ids
     finally:
         event.remove(Outbox, "before_insert", invalidate_outbox)
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_rolls_back_payment_and_outbox(
+    outbox_database: Database,
+) -> None:
+    payment = DomainPayment(
+        id=uuid4(),
+        amount=Decimal("10.50"),
+        currency=PaymentCurrency.RUB,
+        description="Commit failure",
+        payment_metadata={},
+        idempotency_key=str(uuid4()),
+        webhook_url="https://example.com/webhook",
+    )
+    error = RuntimeError("commit failed")
+
+    def fail_commit(session: Session) -> None:
+        raise error
+
+    with pytest.raises(RuntimeError, match="commit failed") as caught:
+        async with outbox_database.session_scope() as session:
+            repository = PaymentRepository(session)
+            await repository.save_with_outbox(
+                payment, event_payload=build_payment_created_payload(payment)
+            )
+            await session.flush()
+            assert await session.get(Payment, payment.id) is not None
+            assert (
+                await session.scalar(
+                    select(Outbox).where(Outbox.payment_id == payment.id)
+                )
+                is not None
+            )
+            event.listen(session.sync_session, "before_commit", fail_commit, once=True)
+
+    assert caught.value is error
+    async with outbox_database.session_scope() as session:
+        assert await session.get(Payment, payment.id) is None
+        assert (
+            await session.scalar(select(Outbox).where(Outbox.payment_id == payment.id))
+            is None
+        )

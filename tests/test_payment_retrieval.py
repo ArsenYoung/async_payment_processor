@@ -6,10 +6,10 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import AsyncClient
 
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.core.config import settings
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.session import Database
-from payment_processor.services.payment_service import PaymentService
 
 pytestmark = pytest.mark.integration
 

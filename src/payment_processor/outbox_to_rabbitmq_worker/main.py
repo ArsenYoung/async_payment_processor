@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from payment_processor.application.outbox_service import OutboxService
 from payment_processor.core.config import settings
 from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
@@ -10,7 +11,6 @@ from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.topology import declare_payment_topology
-from payment_processor.services.outbox_service import OutboxService
 
 
 async def run_publisher() -> None:

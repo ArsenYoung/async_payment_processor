@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, call
 import pytest
 
 from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.db.session import Database
 from payment_processor.rabbitmq_to_payment_worker import main as consumer_main
-from payment_processor.services.payment_service import PaymentService
 
 pytestmark = pytest.mark.unit
 

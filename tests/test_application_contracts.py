@@ -6,16 +6,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("package", ["application", "services"])
-def test_application_contracts_import_without_frameworks_or_adapters(
-    package: str,
-) -> None:
+def test_application_contracts_import_without_frameworks_or_adapters() -> None:
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             "import importlib, pkgutil, sys; "
-            f"application = importlib.import_module('payment_processor.{package}'); "
+            "application = importlib.import_module('payment_processor.application'); "
             "[importlib.import_module(module.name) "
             "for module in pkgutil.walk_packages("
             "application.__path__, application.__name__ + '.')]; "

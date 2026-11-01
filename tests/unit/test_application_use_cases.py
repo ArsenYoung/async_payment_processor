@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -11,18 +11,18 @@ from payment_processor.application.errors import (
     IdempotencyKeyViolationError,
     PaymentNotFoundError,
 )
+from payment_processor.application.payment_creation import (
+    CreatePaymentUseCase,
+    IdempotencyConflictError,
+)
+from payment_processor.application.payment_lookup import GetPaymentUseCase
+from payment_processor.application.payment_processing import ProcessPaymentUseCase
 from payment_processor.application.results import (
     PaymentCreatedResult,
     PaymentDetailsResult,
 )
+from payment_processor.application.webhook_delivery import DeliverPaymentWebhookUseCase
 from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.services.payment_creation import (
-    CreatePaymentUseCase,
-    IdempotencyConflictError,
-)
-from payment_processor.services.payment_lookup import GetPaymentUseCase
-from payment_processor.services.payment_processing import ProcessPaymentUseCase
-from payment_processor.services.webhook_delivery import DeliverPaymentWebhookUseCase
 
 pytestmark = pytest.mark.unit
 
@@ -55,7 +55,6 @@ def payment(status: PaymentStatus = PaymentStatus.PENDING) -> Payment:
 async def test_create_use_case_saves_payment_and_event_payload() -> None:
     saved = payment()
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.return_value = None
     repository.save_with_outbox.return_value = saved
 
@@ -72,8 +71,18 @@ async def test_create_use_case_saves_payment_and_event_payload() -> None:
 
     assert result.payment_id == saved.id
     assert isinstance(result, PaymentCreatedResult)
-    repository.set_event_payload.assert_called_once()
     repository.save_with_outbox.assert_awaited_once()
+    created = repository.save_with_outbox.call_args.args[0]
+    assert repository.save_with_outbox.call_args.kwargs == {
+        "event_payload": {
+            "payment_id": str(created.id),
+            "amount": "10.50",
+            "currency": "RUB",
+            "description": command.description,
+            "metadata": command.metadata,
+            "webhook_url": command.webhook_url,
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -299,7 +308,6 @@ async def test_create_recovers_idempotency_violation(
     if conflict:
         saved.amount += Decimal("1")
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.side_effect = [None, saved]
     error = IdempotencyKeyViolationError()
     repository.save_with_outbox.side_effect = error
@@ -317,7 +325,6 @@ async def test_create_recovers_idempotency_violation(
 @pytest.mark.asyncio
 async def test_create_preserves_violation_when_payment_cannot_be_found() -> None:
     repository = AsyncMock()
-    repository.set_event_payload = Mock()
     repository.find_by_idempotency_key.return_value = None
     error = IdempotencyKeyViolationError()
     repository.save_with_outbox.side_effect = error
@@ -415,7 +422,7 @@ async def test_external_deadline_releases_lease(
 ) -> None:
     import asyncio
 
-    from payment_processor.services import payment_processing, webhook_delivery
+    from payment_processor.application import payment_processing, webhook_delivery
 
     saved = payment() if operation == "process" else payment(PaymentStatus.SUCCEEDED)
     repository = AsyncMock()
@@ -441,6 +448,36 @@ async def test_external_deadline_releases_lease(
     repository.release_lease.assert_awaited_once()
     repository.save.assert_not_awaited()
     repository.mark_webhook_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("amount", Decimal("0")),
+        ("amount", Decimal("-1")),
+        ("amount", Decimal("NaN")),
+        ("amount", Decimal("1.001")),
+        ("amount", Decimal("1E16")),
+        ("currency", "GBP"),
+        ("idempotency_key", ""),
+        ("idempotency_key", "a" * 256),
+        ("idempotency_key", "invalid\x00key"),
+        ("webhook_url", "ftp://example.com"),
+    ],
+)
+async def test_creation_rejects_invalid_command_before_opening_store(
+    field: str,
+    value: object,
+) -> None:
+    from dataclasses import replace
+    from unittest.mock import Mock
+
+    scope = Mock()
+    command = replace(command_for(payment()), **{field: value})
+    with pytest.raises(ValueError):
+        await CreatePaymentUseCase(scope).create(command)
+    scope.assert_not_called()
 
 
 @pytest.mark.asyncio

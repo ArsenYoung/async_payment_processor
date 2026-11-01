@@ -1,6 +1,7 @@
 import asyncio
 import signal
 from copy import copy
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, call
 from uuid import uuid4
@@ -14,20 +15,24 @@ from sqlalchemy.exc import (
     ProgrammingError,
 )
 
-from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application import outbox_service as outbox_module
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.application.outbox_service import (
+    OutboxService,
+    PublicationResult,
+)
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import Settings
 from payment_processor.db.models import Outbox
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import PaymentCurrency
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.outbox_to_rabbitmq_worker import main as publisher_main
-from payment_processor.services import outbox_service as outbox_module
-from payment_processor.services.outbox_service import OutboxService, PublicationResult
 
 
 @pytest.fixture
@@ -456,8 +461,14 @@ async def test_running_publisher_publishes_new_payment_automatically(
                         await started.wait()
                         service = create_payment_service(outbox_database.session_scope)
                         payment = await service.create_payment(
-                            PaymentCreateRequest.model_validate(payment_payload),
-                            f"test-lifecycle-{uuid4()}",
+                            CreatePaymentCommand(
+                                amount=Decimal(payment_payload["amount"]),
+                                currency=PaymentCurrency(payment_payload["currency"]),
+                                description=payment_payload["description"],
+                                metadata=payment_payload["metadata"],
+                                webhook_url=payment_payload["webhook_url"],
+                                idempotency_key=f"test-lifecycle-{uuid4()}",
+                            ),
                         )
                         await committed.wait()
                         message = await declared_queue.get(timeout=2)

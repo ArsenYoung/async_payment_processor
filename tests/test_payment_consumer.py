@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import copy
+from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, call
 from uuid import uuid4
 
@@ -18,22 +19,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
-from payment_processor.api.schemas.payment import PaymentCreateRequest
-from payment_processor.application.commands import (
-    DeliverWebhookCommand,
-    ProcessPaymentCommand,
-)
+from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import PaymentCurrency
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import RetryPolicy
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.fixture(autouse=True)
@@ -61,7 +60,14 @@ async def saved_event(
     payment = await create_payment_service(
         outbox_database.session_scope
     ).create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"consumer-{uuid4()}"
+        CreatePaymentCommand(
+            amount=Decimal(payment_payload["amount"]),
+            currency=PaymentCurrency(payment_payload["currency"]),
+            description=payment_payload["description"],
+            metadata=payment_payload["metadata"],
+            webhook_url=payment_payload["webhook_url"],
+            idempotency_key=f"consumer-{uuid4()}",
+        )
     )
     async with outbox_database.session_scope() as session:
         outbox = await session.scalar(
@@ -100,10 +106,8 @@ async def test_subscriber_processes_before_delivering_webhook(
         await _publish(broker, payment_event)
 
     assert service.mock_calls == [
-        call.process_payment(ProcessPaymentCommand(payment_event.payload.payment_id)),
-        call.deliver_webhook(
-            DeliverWebhookCommand(payment_event.payload.payment_id), webhook
-        ),
+        call.process_payment(payment_event.payload.payment_id),
+        call.deliver_webhook(payment_event.payload.payment_id, webhook),
     ]
 
 
@@ -604,7 +608,9 @@ async def test_real_rabbitmq_message_completes_payment_and_delivery(
                 try:
                     await topology.declare_payment_topology(broker)
                     await broker.start()
-                    await topology.publish_payment_event(broker, saved_event)
+                    await RabbitEventPublisher(broker).publish_payment_created(
+                        saved_event, timeout=5.0
+                    )
                     async with asyncio.timeout(5):
                         while True:
                             async with outbox_database.session_scope() as session:

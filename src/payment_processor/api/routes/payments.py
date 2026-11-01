@@ -11,9 +11,10 @@ from payment_processor.api.schemas.payment import (
     PaymentDetailsResponse,
 )
 from payment_processor.api.schemas.validation import validate_database_text
-from payment_processor.application.commands import CreatePaymentCommand, GetPaymentQuery
-from payment_processor.services.payment_creation import IdempotencyConflictError
-from payment_processor.services.payment_service import PaymentService
+from payment_processor.application.commands import CreatePaymentCommand
+from payment_processor.application.payment_creation import IdempotencyConflictError
+from payment_processor.application.payment_service import PaymentService
+from payment_processor.domain.validation import IDEMPOTENCY_KEY_MAX_LENGTH
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -28,7 +29,9 @@ async def create_payment(
     http_request: Request,
     idempotency_key: Annotated[
         str,
-        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+        Header(
+            alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH
+        ),
         AfterValidator(validate_database_text),
     ],
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
@@ -69,7 +72,7 @@ async def get_payment(
     payment_service: Annotated[PaymentService, Depends(get_payment_service)],
 ) -> PaymentDetailsResponse:
     request.state.payment_id = payment_id
-    result = await payment_service.get_payment(GetPaymentQuery(payment_id))
+    result = await payment_service.get_payment(payment_id)
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

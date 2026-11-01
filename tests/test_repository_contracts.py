@@ -7,10 +7,10 @@ import pytest
 from unit.fakes import MemoryPayments
 
 from payment_processor.application.errors import LeaseLostError
+from payment_processor.application.payment_events import build_payment_created_payload
 from payment_processor.application.ports import PaymentRepository
 from payment_processor.db.repositories.factories import payment_repository_scope
 from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.services.payment_events import build_payment_created_payload
 
 RepositoryScope = Callable[[], AbstractAsyncContextManager[PaymentRepository]]
 
@@ -43,8 +43,9 @@ def contract_payment() -> Payment:
 
 async def seed(scope: RepositoryScope, payment: Payment) -> None:
     async with scope() as repository:
-        repository.set_event_payload(build_payment_created_payload(payment))
-        saved = await repository.save_with_outbox(payment)
+        saved = await repository.save_with_outbox(
+            payment, event_payload=build_payment_created_payload(payment)
+        )
         assert isinstance(saved, Payment)
         assert saved.id == payment.id
 
@@ -89,10 +90,10 @@ async def test_repository_port_rolls_back_creation_and_changes(
 ) -> None:
     with pytest.raises(RuntimeError, match="abort creation"):
         async with repository_scope() as repository:
-            repository.set_event_payload(
-                build_payment_created_payload(contract_payment)
+            await repository.save_with_outbox(
+                contract_payment,
+                event_payload=build_payment_created_payload(contract_payment),
             )
-            await repository.save_with_outbox(contract_payment)
             raise RuntimeError("abort creation")
     async with repository_scope() as repository:
         assert await repository.find_by_id(contract_payment.id) is None

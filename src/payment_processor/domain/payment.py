@@ -6,6 +6,12 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from payment_processor.domain.validation import (
+    validate_amount,
+    validate_idempotency_key,
+    validate_webhook_url,
+)
+
 
 class PaymentCurrency(StrEnum):
     RUB = "RUB"
@@ -48,6 +54,9 @@ class Payment:
     webhook_delivered_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        validate_amount(self.amount)
+        validate_idempotency_key(self.idempotency_key)
+        validate_webhook_url(self.webhook_url)
         self.status = PaymentStatus(self.status)
         self.currency = PaymentCurrency(self.currency)
         self.payment_metadata = deepcopy(self.payment_metadata)

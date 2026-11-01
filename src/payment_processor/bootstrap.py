@@ -4,6 +4,8 @@ from contextlib import AbstractAsyncContextManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.application.outbox_service import OutboxService
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.application.ports import EventPublisher, PaymentGateway
 from payment_processor.db.repositories.factories import (
     outbox_repository_scope,
@@ -12,8 +14,6 @@ from payment_processor.db.repositories.factories import (
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.messaging import topology
-from payment_processor.services.outbox_service import OutboxService
-from payment_processor.services.payment_service import PaymentService
 
 
 def create_payment_service(

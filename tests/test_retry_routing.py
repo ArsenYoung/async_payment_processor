@@ -19,8 +19,11 @@ from pamqp.commands import Basic
 from sqlalchemy.exc import OperationalError
 
 from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.application.errors import LeaseBusyError
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
+from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.retry import (
     ATTEMPT_HEADER,
     RetryAttempt,
@@ -32,7 +35,6 @@ from payment_processor.messaging.schemas import PaymentCreatedEvent
 from payment_processor.rabbitmq_to_payment_worker.handlers import (
     register_payment_subscriber,
 )
-from payment_processor.services.payment_service import PaymentService
 
 
 @pytest.fixture(autouse=True)
@@ -478,15 +480,18 @@ async def test_real_retry_waits_then_returns_persistent_event(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [TimeoutError, LeaseBusyError])
 async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
-    routing_broker: RabbitBroker, payment_event: PaymentCreatedEvent
+    routing_broker: RabbitBroker,
+    payment_event: PaymentCreatedEvent,
+    error_type: type[TimeoutError],
 ) -> None:
     service = Mock(spec=PaymentService)
     calls = []
 
     async def fail(*args: object) -> None:
         calls.append(monotonic())
-        raise TimeoutError("Unavailable")
+        raise error_type("Unavailable")
 
     service.process_payment.side_effect = fail
     register_payment_subscriber(
@@ -496,13 +501,15 @@ async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
         retry_policy=RetryPolicy(base_delay=0.1),
     )
     await routing_broker.start()
-    await topology.publish_payment_event(routing_broker, payment_event)
+    await RabbitEventPublisher(routing_broker).publish_payment_created(
+        payment_event, timeout=5.0
+    )
     message = await receive(routing_broker, topology.dead_letter_queue())
     async with message.process():
         assert PaymentCreatedEvent.model_validate_json(message.body) == payment_event
         assert message.message_id == str(payment_event.event_id)
         assert message.headers[ATTEMPT_HEADER] == 3
-        assert message.headers["x-payment-error-type"] == "TimeoutError"
+        assert message.headers["x-payment-error-type"] == error_type.__name__
         assert message.headers["x-payment-error-reason"] == "attempts_exhausted"
         assert message.delivery_mode == DeliveryMode.PERSISTENT
     assert len(calls) == 3

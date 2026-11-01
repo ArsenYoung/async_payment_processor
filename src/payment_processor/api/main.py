@@ -1,9 +1,16 @@
+import json
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.docs import (
+    get_redoc_html,
+    get_swagger_ui_html,
+    get_swagger_ui_oauth2_redirect_html,
+)
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.api.dependencies import require_api_key
@@ -39,6 +46,9 @@ def create_app(database: Database | None = None) -> FastAPI:
     application = FastAPI(
         title="Payment Processing Service",
         lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
         dependencies=[Depends(require_api_key)],
     )
     application.state.database = (
@@ -52,11 +62,52 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.add_middleware(RequestLoggingMiddleware)
     application.include_router(payments_router, prefix="/api/v1")
     application.add_api_route("/health", healthcheck, methods=["GET"], tags=["health"])
+    application.add_api_route("/openapi.json", openapi_schema, include_in_schema=False)
+    application.add_api_route("/docs", swagger_documentation, include_in_schema=False)
+    application.add_api_route("/redoc", redoc_documentation, include_in_schema=False)
+    application.add_api_route(
+        "/docs/oauth2-redirect",
+        get_swagger_ui_oauth2_redirect_html,
+        include_in_schema=False,
+    )
     return application
 
 
 async def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+async def openapi_schema(request: Request) -> JSONResponse:
+    return JSONResponse(request.app.openapi())
+
+
+def embedded_schema(request: Request) -> str:
+    return json.dumps(request.app.openapi()).replace("<", "\\u003c")
+
+
+async def swagger_documentation(request: Request) -> HTMLResponse:
+    response = get_swagger_ui_html(openapi_url="/openapi.json", title="Payment API")
+    html = (
+        bytes(response.body)
+        .decode()
+        .replace("url: '/openapi.json',", f"spec: {embedded_schema(request)},")
+    )
+    return HTMLResponse(html)
+
+
+async def redoc_documentation(request: Request) -> HTMLResponse:
+    response = get_redoc_html(openapi_url="/openapi.json", title="Payment API")
+    html = (
+        bytes(response.body)
+        .decode()
+        .replace('<redoc spec-url="/openapi.json"></redoc>', '<div id="redoc"></div>')
+        .replace(
+            "</body>",
+            f"<script>Redoc.init({embedded_schema(request)}, {{}}, "
+            'document.getElementById("redoc"));</script></body>',
+        )
+    )
+    return HTMLResponse(html)
 
 
 app = create_app()

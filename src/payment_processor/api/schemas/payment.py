@@ -11,12 +11,19 @@ from payment_processor.api.schemas.validation import (
     validate_json_value,
 )
 from payment_processor.domain.payment import PaymentCurrency, PaymentStatus
+from payment_processor.domain.validation import (
+    AMOUNT_DECIMAL_PLACES,
+    AMOUNT_MAX_DIGITS,
+    WEBHOOK_URL_MAX_LENGTH,
+)
 
 
 class PaymentCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=2)
+    amount: Decimal = Field(
+        gt=0, max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMAL_PLACES
+    )
     currency: PaymentCurrency
     description: str = Field(min_length=1, max_length=500)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
@@ -36,7 +43,7 @@ class PaymentCreateRequest(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def validate_webhook_url(cls, value: HttpUrl) -> HttpUrl:
-        if len(str(value)) > 2048:
+        if len(str(value)) > WEBHOOK_URL_MAX_LENGTH:
             raise ValueError("Webhook URL must not exceed 2048 characters")
         return value
 

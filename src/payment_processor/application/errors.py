@@ -17,3 +17,7 @@ class PaymentNotFoundError(LookupError):
 
 class LeaseLostError(TimeoutError):
     pass
+
+
+class LeaseBusyError(TimeoutError):
+    pass

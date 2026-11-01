@@ -6,13 +6,13 @@ from time import perf_counter
 from uuid import UUID
 
 from payment_processor.application.errors import PaymentNotFoundError
-from payment_processor.application.results import PaymentDetailsResult
-from payment_processor.core.logging import processing_fields
-from payment_processor.services.payment_leases import (
+from payment_processor.application.payment_leases import (
     EXTERNAL_CALL_TIMEOUT,
     payment_lease,
 )
-from payment_processor.services.ports import PaymentGateway, PaymentProcessingStore
+from payment_processor.application.ports import PaymentGateway, PaymentProcessingStore
+from payment_processor.application.results import PaymentDetailsResult
+from payment_processor.core.logging import processing_fields
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,3 @@ class ProcessPaymentUseCase:
             },
         )
         return PaymentDetailsResult.from_payment(payment)
-
-
-PaymentProcessingService = ProcessPaymentUseCase

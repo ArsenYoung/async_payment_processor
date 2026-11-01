@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from copy import copy
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -15,9 +16,9 @@ if TYPE_CHECKING:
     from httpx import AsyncClient
 
     from payment_processor.adapters.webhooks import WebhookClient
+    from payment_processor.application.payment_service import PaymentService
     from payment_processor.db.session import Database
     from payment_processor.messaging.schemas import PaymentCreatedEvent
-    from payment_processor.services.payment_service import PaymentService
 
 
 @pytest_asyncio.fixture
@@ -108,15 +109,23 @@ async def retry_event(
 ) -> PaymentCreatedEvent:
     from sqlalchemy import select
 
-    from payment_processor.api.schemas.payment import PaymentCreateRequest
+    from payment_processor.application.commands import CreatePaymentCommand
     from payment_processor.bootstrap import create_payment_service
     from payment_processor.db.models import Outbox
+    from payment_processor.domain.payment import PaymentCurrency
     from payment_processor.messaging.schemas import PaymentCreatedEvent
 
     payment = await create_payment_service(
         outbox_database.session_scope
     ).create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"retry-{uuid4()}"
+        CreatePaymentCommand(
+            amount=Decimal(payment_payload["amount"]),
+            currency=PaymentCurrency(payment_payload["currency"]),
+            description=payment_payload["description"],
+            metadata=payment_payload["metadata"],
+            webhook_url=payment_payload["webhook_url"],
+            idempotency_key=f"retry-{uuid4()}",
+        )
     )
     async with outbox_database.session_scope() as session:
         outbox = await session.scalar(

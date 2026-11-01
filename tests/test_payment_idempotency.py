@@ -13,11 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.application.errors import IdempotencyKeyViolationError
+from payment_processor.application.payment_service import PaymentService
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
-from payment_processor.services.payment_service import PaymentService
 
 pytestmark = pytest.mark.integration
 
@@ -446,7 +446,9 @@ def _insert_invalid_outbox(
     outbox_id: UUID,
 ) -> Mock:
     class InvalidOutboxRepository(MissingPaymentRepository):
-        async def save_with_outbox(self, payment: Payment) -> Payment:
+        async def save_with_outbox(
+            self, payment: Payment, *, event_payload: dict[str, object]
+        ) -> Payment:
             self.session.add(
                 Outbox(
                     id=outbox_id if violation == "duplicate-outbox" else uuid4(),
@@ -475,9 +477,13 @@ def _hide_existing_payment(
     errors: list[IntegrityError] = []
 
     class UnfindablePaymentRepository(MissingPaymentRepository):
-        async def save_with_outbox(self, payment: Payment) -> Payment:
+        async def save_with_outbox(
+            self, payment: Payment, *, event_payload: dict[str, object]
+        ) -> Payment:
             try:
-                return await super().save_with_outbox(payment)
+                return await super().save_with_outbox(
+                    payment, event_payload=event_payload
+                )
             except IntegrityError as error:
                 errors.append(error)
                 raise

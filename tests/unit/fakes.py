@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from payment_processor.application.errors import (
@@ -9,7 +10,6 @@ from payment_processor.application.errors import (
     LeaseLostError,
 )
 from payment_processor.application.ports import LeaseOperation, PaymentRepository
-from payment_processor.application.records import PaymentInput
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.domain.payment import Payment, PaymentStatus
 
@@ -43,7 +43,6 @@ class MemoryPayments:
 class MemoryPaymentRepository(PaymentRepository):
     def __init__(self, store: MemoryPayments) -> None:
         self.store = store
-        self.payload: dict[str, object] | None = None
 
     async def find_by_id(self, payment_id: UUID) -> Payment | None:
         return deepcopy(self.store.payments.get(payment_id))
@@ -61,12 +60,9 @@ class MemoryPaymentRepository(PaymentRepository):
             None,
         )
 
-    def set_event_payload(self, payload: dict[str, object]) -> None:
-        self.payload = deepcopy(payload)
-
-    async def save_with_outbox(self, payment: PaymentInput) -> Payment:
-        if self.payload is None:
-            raise ValueError("Event payload is required")
+    async def save_with_outbox(
+        self, payment: Payment, *, event_payload: dict[str, Any]
+    ) -> Payment:
         if await self.find_by_idempotency_key(payment.idempotency_key) is not None:
             raise IdempotencyKeyViolationError
         saved = Payment(
@@ -79,7 +75,7 @@ class MemoryPaymentRepository(PaymentRepository):
             webhook_url=payment.webhook_url,
         )
         self.store.payments[saved.id] = deepcopy(saved)
-        self.store.events.append(deepcopy(self.payload))
+        self.store.events.append(deepcopy(event_payload))
         return saved
 
     async def save(self, payment: Payment) -> None:

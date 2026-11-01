@@ -193,22 +193,31 @@ async def test_each_application_protects_added_routes(
         ("/docs/oauth2-redirect", "text/html"),
     ],
 )
-@pytest.mark.parametrize("with_api_key", [False, True], ids=["anonymous", "authorized"])
-async def test_each_application_exposes_public_documentation(
+@pytest.mark.parametrize(
+    "api_key",
+    [None, "wrong-api-key", "valid"],
+    ids=["anonymous", "wrong", "authorized"],
+)
+async def test_each_application_protects_documentation(
     applications: tuple[FastAPI, FastAPI],
     path: str,
     content_type: str,
-    with_api_key: bool,
+    api_key: str | None,
 ) -> None:
-    headers = {"X-API-Key": settings.api_key} if with_api_key else {}
+    headers = (
+        {}
+        if api_key is None
+        else {"X-API-Key": settings.api_key if api_key == "valid" else api_key}
+    )
     for application in applications:
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
         ) as client:
             response = await client.get(path, headers=headers)
 
-        assert response.status_code == 200
-        assert response.headers["content-type"].startswith(content_type)
+        assert response.status_code == (200 if api_key == "valid" else 401)
+        if api_key == "valid":
+            assert response.headers["content-type"].startswith(content_type)
 
 
 @pytest.mark.unit
@@ -230,7 +239,9 @@ async def test_each_application_documents_api_key_authorization(
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
         ) as client:
-            response = await client.get("/openapi.json")
+            response = await client.get(
+                "/openapi.json", headers={"X-API-Key": settings.api_key}
+            )
 
         assert response.status_code == 200
         schema = response.json()
@@ -270,3 +281,20 @@ async def test_each_application_uses_validation_error_handler(
         assert len(errors) == 1
         assert errors[0]["loc"] == ["body", "amount"]
         assert set(errors[0]) == {"type", "loc", "msg"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/docs", "/redoc"])
+async def test_documentation_embeds_schema_without_unauthenticated_fetch(
+    applications: tuple[FastAPI, FastAPI],
+    path: str,
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=applications[0]), base_url="http://test"
+    ) as client:
+        response = await client.get(path, headers={"X-API-Key": settings.api_key})
+    assert response.status_code == 200
+    assert '"/api/v1/payments"' in response.text
+    assert "url: '/openapi.json'" not in response.text
+    assert 'spec-url="/openapi.json"' not in response.text
