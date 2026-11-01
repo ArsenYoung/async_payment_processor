@@ -835,3 +835,5 @@ CI запускает Docker smoke/e2e отдельным job с `RUN_DOCKER_SMO
 Прикладной фасад `PaymentService` принимает только `CreatePaymentCommand`, `GetPaymentQuery`, `ProcessPaymentCommand` и `DeliverWebhookCommand`. Преобразование HTTP-запроса выполняется маршрутом API.
 
 Команды, query, результаты и порты находятся в `application`. SQLAlchemy-репозитории называются `SqlAlchemyPaymentRepository` и `SqlAlchemyOutboxRepository`; совместимые алиасы и модули `services.contracts`/`services.ports` удалены.
+
+`RabbitEventPublisher` использует общую подтверждённую публикацию `topology.publish_payment_event`: persistent, mandatory, ограничение времени и проверку `Basic.Ack`. Объявление топологии выполняется отдельно.
