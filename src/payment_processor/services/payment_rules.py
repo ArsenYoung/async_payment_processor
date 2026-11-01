@@ -1,10 +1,10 @@
 from datetime import datetime
 from decimal import Decimal
 
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.domain.payment import Payment, PaymentStatus
 from payment_processor.domain.payment import can_process as can_process
 from payment_processor.domain.payment import is_completed as is_completed
-from payment_processor.services.contracts import CreatePaymentCommand
 
 
 def json_values_equal(left: object, right: object) -> bool:

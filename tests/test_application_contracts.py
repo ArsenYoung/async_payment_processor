@@ -30,3 +30,10 @@ def test_application_contracts_import_without_frameworks_or_adapters(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("name", ["contracts", "ports"])
+def test_legacy_service_contract_modules_are_removed(name):
+    from importlib.util import find_spec
+
+    assert find_spec(f"payment_processor.services.{name}") is None

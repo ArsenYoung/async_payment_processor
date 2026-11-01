@@ -9,8 +9,8 @@ from payment_processor.db.repositories.factories import (
     outbox_repository_scope,
     payment_repository_scope,
 )
-from payment_processor.db.repositories.outbox import OutboxRepository
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.messaging import topology
 from payment_processor.services.outbox_service import OutboxService
 from payment_processor.services.payment_service import PaymentService
@@ -18,7 +18,9 @@ from payment_processor.services.payment_service import PaymentService
 
 def create_payment_service(
     session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-    repository_factory: Callable[[AsyncSession], PaymentRepository] = PaymentRepository,
+    repository_factory: Callable[
+        [AsyncSession], SqlAlchemyPaymentRepository
+    ] = SqlAlchemyPaymentRepository,
     *,
     gateway: PaymentGateway | None = None,
 ) -> PaymentService:
@@ -31,7 +33,9 @@ def create_payment_service(
 def create_outbox_service(
     session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
     publisher: EventPublisher,
-    repository_factory: Callable[[AsyncSession], OutboxRepository] = OutboxRepository,
+    repository_factory: Callable[
+        [AsyncSession], SqlAlchemyOutboxRepository
+    ] = SqlAlchemyOutboxRepository,
 ) -> OutboxService:
     return OutboxService(
         outbox_repository_scope(session_scope_factory, repository_factory),

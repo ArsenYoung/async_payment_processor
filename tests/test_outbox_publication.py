@@ -18,7 +18,7 @@ from payment_processor.api.schemas.payment import PaymentCreateRequest
 from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
-from payment_processor.db.repositories.outbox import OutboxRepository
+from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
 from payment_processor.db.session import Database
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
@@ -350,7 +350,7 @@ async def test_cancellation_preserves_confirmed_events_and_releases_current_clai
 
     async with asyncio.timeout(2):
         async with outbox_database.session_scope() as session:
-            events = await OutboxRepository(session).fetch_unpublished(10)
+            events = await SqlAlchemyOutboxRepository(session).fetch_unpublished(10)
             assert [event.id for event in events] == [
                 event.id for event in outbox_events[1:]
             ]
@@ -367,7 +367,7 @@ async def test_database_error_preserves_confirmed_events_and_rolls_back_current_
     broker: Mock,
     outcome: str,
 ) -> None:
-    class FailingRepository(OutboxRepository):
+    class FailingRepository(SqlAlchemyOutboxRepository):
         async def mark_published(self, event: Outbox) -> None:
             await super().mark_published(event)
             await self._fail_second(event)
@@ -399,7 +399,7 @@ async def test_database_error_preserves_confirmed_events_and_rolls_back_current_
 
     async with asyncio.timeout(2):
         async with outbox_database.session_scope() as session:
-            events = await OutboxRepository(session).fetch_unpublished(10)
+            events = await SqlAlchemyOutboxRepository(session).fetch_unpublished(10)
             assert [event.id for event in events] == [
                 event.id for event in outbox_events[1:]
             ]
@@ -481,7 +481,7 @@ async def test_expired_publication_lease_is_reclaimed_and_fences_old_owner(
 
     old_token, new_token = uuid4(), uuid4()
     async with outbox_database.session_scope() as session:
-        claimed = await OutboxRepository(session).claim_next(
+        claimed = await SqlAlchemyOutboxRepository(session).claim_next(
             old_token, 60, exclude_ids=[]
         )
         assert claimed.id == outbox_events[0].id
@@ -492,14 +492,16 @@ async def test_expired_publication_lease_is_reclaimed_and_fences_old_owner(
             .values(publication_until=datetime.now(UTC) - timedelta(seconds=1))
         )
     async with outbox_database.session_scope() as session:
-        repository = OutboxRepository(session)
+        repository = SqlAlchemyOutboxRepository(session)
         reclaimed = await repository.claim_next(new_token, 60, exclude_ids=[])
         assert reclaimed.id == claimed.id
         await repository.release_claim(claimed.id, old_token)
         assert (await repository.lock_claimed(claimed.id, new_token)).id == claimed.id
     with pytest.raises(LeaseLostError):
         async with outbox_database.session_scope() as session:
-            await OutboxRepository(session).lock_claimed(claimed.id, old_token)
+            await SqlAlchemyOutboxRepository(session).lock_claimed(
+                claimed.id, old_token
+            )
 
 
 @pytest.mark.asyncio
@@ -519,7 +521,7 @@ async def test_lost_lease_after_broker_ack_cannot_mark_event_published(
                 .values(publication_until=datetime.now(UTC) - timedelta(seconds=1))
             )
         async with outbox_database.session_scope() as session:
-            reclaimed = await OutboxRepository(session).claim_next(
+            reclaimed = await SqlAlchemyOutboxRepository(session).claim_next(
                 new_token, 60, exclude_ids=[]
             )
             assert reclaimed.id == event_id

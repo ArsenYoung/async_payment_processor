@@ -5,6 +5,7 @@ from contextlib import AbstractAsyncContextManager
 from time import perf_counter
 from uuid import UUID
 
+from payment_processor.application.ports import WebhookDeliveryStore, WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
 from payment_processor.domain.payment import InvalidPaymentTransition
@@ -12,7 +13,6 @@ from payment_processor.services.payment_leases import (
     EXTERNAL_CALL_TIMEOUT,
     payment_lease,
 )
-from payment_processor.services.ports import WebhookDeliveryStore, WebhookSender
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,3 @@ class DeliverPaymentWebhookUseCase:
                 "duration_ms": (perf_counter() - started) * 1000,
             },
         )
-
-
-WebhookDeliveryService = DeliverPaymentWebhookUseCase

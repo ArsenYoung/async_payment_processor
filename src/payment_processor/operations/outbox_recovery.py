@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from payment_processor.db.models import Outbox
-from payment_processor.db.repositories.outbox import OutboxRepository
+from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
 from payment_processor.db.session import Database
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 
@@ -15,7 +15,7 @@ async def recover_event(
     database: Database, event_id: UUID, *, payload: dict[str, Any] | None = None
 ) -> None:
     async with database.session_scope() as session:
-        repository = OutboxRepository(session)
+        repository = SqlAlchemyOutboxRepository(session)
         record = await repository.get_for_recovery(event_id)
         if record is None:
             raise LookupError("Outbox event does not exist")

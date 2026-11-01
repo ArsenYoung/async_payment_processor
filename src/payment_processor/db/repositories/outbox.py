@@ -118,6 +118,3 @@ class SqlAlchemyOutboxRepository(OutboxStore):
         event.quarantined_at = None
         event.next_attempt_at = None
         await self.session.flush()
-
-
-OutboxRepository = SqlAlchemyOutboxRepository

@@ -833,3 +833,5 @@ CI запускает Docker smoke/e2e отдельным job с `RUN_DOCKER_SMO
 Обработка, публикация Outbox и доставка webhook используют порядок claim → commit → внешний вызов без открытой транзакции → проверка токена и срока lease → commit результата. Три управляемые попытки consumer не ограничивают общее число broker redelivery. При потере подтверждения внешний вызов может повториться: gateway обязан дедуплицировать по UUID платежа, получатель — по `X-Webhook-Delivery-Id`.
 
 Прикладной фасад `PaymentService` принимает только `CreatePaymentCommand`, `GetPaymentQuery`, `ProcessPaymentCommand` и `DeliverWebhookCommand`. Преобразование HTTP-запроса выполняется маршрутом API.
+
+Команды, query, результаты и порты находятся в `application`. SQLAlchemy-репозитории называются `SqlAlchemyPaymentRepository` и `SqlAlchemyOutboxRepository`; совместимые алиасы и модули `services.contracts`/`services.ports` удалены.

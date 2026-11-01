@@ -12,14 +12,14 @@ from payment_processor.db.models import (
     Payment,
     PaymentCurrency,
 )
-from payment_processor.db.repositories.outbox import OutboxRepository
+from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
 from payment_processor.db.session import Database
 
 
 @pytest.mark.asyncio
 async def test_empty_outbox_returns_no_events(outbox_database: Database) -> None:
     async with outbox_database.session_scope() as session:
-        assert await OutboxRepository(session).fetch_unpublished(10) == []
+        assert await SqlAlchemyOutboxRepository(session).fetch_unpublished(10) == []
 
 
 @pytest.mark.asyncio
@@ -32,7 +32,7 @@ async def test_fetch_excludes_published_events_and_orders_oldest_first(
         events[0].published_at = datetime.now(UTC)
 
     async with outbox_database.session_scope() as session:
-        batch = await OutboxRepository(session).fetch_unpublished(10)
+        batch = await SqlAlchemyOutboxRepository(session).fetch_unpublished(10)
 
         assert [event.id for event in batch] == [event.id for event in events[1:]]
         assert all(event.published_at is None for event in batch)
@@ -51,7 +51,7 @@ async def test_batch_limit_and_id_order_for_equal_creation_times(
             event.created_at = created_at
 
     async with outbox_database.session_scope() as session:
-        batch = await OutboxRepository(session).fetch_unpublished(2)
+        batch = await SqlAlchemyOutboxRepository(session).fetch_unpublished(2)
 
         assert [event.id for event in batch] == sorted(event.id for event in events)[:2]
 
@@ -63,7 +63,7 @@ async def test_non_positive_batch_limit_is_rejected(
 ) -> None:
     async with outbox_database.session_scope() as session:
         with pytest.raises(ValueError, match="must be positive"):
-            await OutboxRepository(session).fetch_unpublished(limit)
+            await SqlAlchemyOutboxRepository(session).fetch_unpublished(limit)
 
 
 @pytest.mark.asyncio
@@ -74,14 +74,16 @@ async def test_fetch_skips_quarantine_and_future_retries(
     now = datetime.now(UTC)
     async with outbox_database.session_scope() as session:
         session.add_all(events)
-        await OutboxRepository(session).quarantine(events[0], "Invalid payload")
-        await OutboxRepository(session).record_failure(
+        await SqlAlchemyOutboxRepository(session).quarantine(
+            events[0], "Invalid payload"
+        )
+        await SqlAlchemyOutboxRepository(session).record_failure(
             events[1], "Broker unavailable", next_attempt_at=now + timedelta(hours=1)
         )
         events[2].next_attempt_at = now - timedelta(seconds=1)
 
     async with outbox_database.session_scope() as session:
-        batch = await OutboxRepository(session).fetch_unpublished(10)
+        batch = await SqlAlchemyOutboxRepository(session).fetch_unpublished(10)
         assert [event.id for event in batch] == [event.id for event in events[2:]]
         quarantined = await session.get(Outbox, events[0].id)
         assert quarantined is not None
@@ -100,7 +102,7 @@ async def test_rollback_restores_recovery_state(
     [saved] = await _save_events(outbox_database, 1)
     with pytest.raises(RuntimeError, match="Abort recovery"):
         async with outbox_database.session_scope() as session:
-            repository = OutboxRepository(session)
+            repository = SqlAlchemyOutboxRepository(session)
             [record] = await repository.fetch_unpublished(1)
             if outcome == "deferred":
                 await repository.record_failure(
@@ -112,7 +114,7 @@ async def test_rollback_restores_recovery_state(
                 await repository.quarantine(record, "Invalid payload")
             raise RuntimeError("Abort recovery")
     async with outbox_database.session_scope() as session:
-        [record] = await OutboxRepository(session).fetch_unpublished(1)
+        [record] = await SqlAlchemyOutboxRepository(session).fetch_unpublished(1)
         assert record.id == saved.id
         assert record.attempts == 0
         assert record.last_error is None
@@ -135,11 +137,14 @@ async def test_parallel_publishers_lock_disjoint_batches_until_commit(
 
         async with asyncio.timeout(2):
             first, second = await asyncio.gather(
-                OutboxRepository(first_session).fetch_unpublished(2),
-                OutboxRepository(second_session).fetch_unpublished(2),
+                SqlAlchemyOutboxRepository(first_session).fetch_unpublished(2),
+                SqlAlchemyOutboxRepository(second_session).fetch_unpublished(2),
             )
             async with outbox_database.session_scope() as observer:
-                assert await OutboxRepository(observer).fetch_unpublished(10) == []
+                assert (
+                    await SqlAlchemyOutboxRepository(observer).fetch_unpublished(10)
+                    == []
+                )
 
         first_ids = {event.id for event in first}
         second_ids = {event.id for event in second}
@@ -148,7 +153,7 @@ async def test_parallel_publishers_lock_disjoint_batches_until_commit(
         assert first_ids | second_ids == {event.id for event in events}
 
     async with outbox_database.session_scope() as session:
-        batch = await OutboxRepository(session).fetch_unpublished(10)
+        batch = await SqlAlchemyOutboxRepository(session).fetch_unpublished(10)
         assert [event.id for event in batch] == [event.id for event in events]
 
 
@@ -164,7 +169,7 @@ async def test_mark_published_persists_success_and_clears_previous_error(
 
     before = datetime.now(UTC)
     async with outbox_database.session_scope() as session:
-        repository = OutboxRepository(session)
+        repository = SqlAlchemyOutboxRepository(session)
         [event] = await repository.fetch_unpublished(1)
         await repository.mark_published(event)
         assert session.in_transaction()
@@ -176,7 +181,10 @@ async def test_mark_published_persists_success_and_clears_previous_error(
                 assert visible_event.published_at is None
                 assert visible_event.attempts == 2
                 assert visible_event.last_error == "Previous publication failed"
-                assert await OutboxRepository(observer).fetch_unpublished(1) == []
+                assert (
+                    await SqlAlchemyOutboxRepository(observer).fetch_unpublished(1)
+                    == []
+                )
 
     after = datetime.now(UTC)
     async with outbox_database.session_scope() as session:
@@ -188,7 +196,7 @@ async def test_mark_published_persists_success_and_clears_previous_error(
         assert event.last_error is None
         assert event.payload == saved_event.payload
         assert event.created_at == saved_event.created_at
-        assert await OutboxRepository(session).fetch_unpublished(1) == []
+        assert await SqlAlchemyOutboxRepository(session).fetch_unpublished(1) == []
 
 
 @pytest.mark.asyncio
@@ -200,17 +208,20 @@ async def test_record_failure_persists_error_and_keeps_event_available_for_retry
         ["Broker unavailable", "Confirmation timed out"], 1
     ):
         async with outbox_database.session_scope() as session:
-            repository = OutboxRepository(session)
+            repository = SqlAlchemyOutboxRepository(session)
             [event] = await repository.fetch_unpublished(1)
             await repository.record_failure(event, error)
             assert session.in_transaction()
 
             async with asyncio.timeout(2):
                 async with outbox_database.session_scope() as observer:
-                    assert await OutboxRepository(observer).fetch_unpublished(1) == []
+                    assert (
+                        await SqlAlchemyOutboxRepository(observer).fetch_unpublished(1)
+                        == []
+                    )
 
         async with outbox_database.session_scope() as session:
-            [event] = await OutboxRepository(session).fetch_unpublished(1)
+            [event] = await SqlAlchemyOutboxRepository(session).fetch_unpublished(1)
             assert event.id == saved_event.id
             assert event.published_at is None
             assert event.attempts == attempt
@@ -232,7 +243,7 @@ async def test_rollback_restores_event_and_releases_lock(
 
     with pytest.raises(RuntimeError, match="Abort publisher transaction"):
         async with outbox_database.session_scope() as session:
-            repository = OutboxRepository(session)
+            repository = SqlAlchemyOutboxRepository(session)
             [event] = await repository.fetch_unpublished(1)
             if outcome == "published":
                 await repository.mark_published(event)
@@ -241,13 +252,16 @@ async def test_rollback_restores_event_and_releases_lock(
 
             async with asyncio.timeout(2):
                 async with outbox_database.session_scope() as observer:
-                    assert await OutboxRepository(observer).fetch_unpublished(1) == []
+                    assert (
+                        await SqlAlchemyOutboxRepository(observer).fetch_unpublished(1)
+                        == []
+                    )
 
             raise RuntimeError("Abort publisher transaction")
 
     async with asyncio.timeout(2):
         async with outbox_database.session_scope() as session:
-            [event] = await OutboxRepository(session).fetch_unpublished(1)
+            [event] = await SqlAlchemyOutboxRepository(session).fetch_unpublished(1)
             assert event.id == saved_event.id
             assert event.published_at is None
             assert event.attempts == 2

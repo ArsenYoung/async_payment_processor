@@ -16,7 +16,7 @@ from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.application.commands import ProcessPaymentCommand
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 
@@ -124,7 +124,7 @@ async def test_concurrent_processing_waits_and_reuses_committed_result(
         await release_gateway.wait()
         return status
 
-    class WaitingRepository(PaymentRepository):
+    class WaitingRepository(SqlAlchemyPaymentRepository):
         async def find_by_id_for_update(self, payment_id: UUID) -> DomainPayment | None:
             nonlocal waiter_pid
             waiter_pid = await self.session.scalar(select(func.pg_backend_pid()))
@@ -245,7 +245,7 @@ async def test_expired_processing_lease_can_be_reclaimed_and_fences_old_owner(
 
     old_token, new_token = uuid4(), uuid4()
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         assert await repository.claim_lease(
             pending_payment.id, "processing", old_token, 60
         )
@@ -253,7 +253,7 @@ async def test_expired_processing_lease_can_be_reclaimed_and_fences_old_owner(
         saved = await session.get(Payment, pending_payment.id)
         saved.processing_until = datetime.now(UTC) - timedelta(seconds=1)
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         assert await repository.claim_lease(
             pending_payment.id, "processing", new_token, 60
         )
@@ -261,7 +261,7 @@ async def test_expired_processing_lease_can_be_reclaimed_and_fences_old_owner(
         await repository.verify_lease(pending_payment.id, "processing", new_token)
     with pytest.raises(LeaseLostError):
         async with outbox_database.session_scope() as session:
-            await PaymentRepository(session).verify_lease(
+            await SqlAlchemyPaymentRepository(session).verify_lease(
                 pending_payment.id, "processing", old_token
             )
 

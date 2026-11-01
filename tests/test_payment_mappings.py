@@ -6,7 +6,7 @@ import pytest
 
 from payment_processor.db.mappers.payment import to_domain, to_model, update_model
 from payment_processor.db.models.payment import Payment as PaymentModel
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment, PaymentCurrency, PaymentStatus
 
@@ -74,18 +74,18 @@ async def test_repository_requires_explicit_save_for_domain_changes(
         session.add(to_model(payment))
 
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         loaded = await repository.find_by_id_for_update(payment.id)
         assert isinstance(loaded, Payment)
         loaded.process(PaymentStatus.SUCCEEDED)
 
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         unchanged = await repository.find_by_id(payment.id)
         assert unchanged is not None
         assert unchanged.status == PaymentStatus.PENDING
         await repository.save(loaded)
 
     async with outbox_database.session_scope() as session:
-        restored = await PaymentRepository(session).find_by_id(payment.id)
+        restored = await SqlAlchemyPaymentRepository(session).find_by_id(payment.id)
         assert restored == loaded
