@@ -36,7 +36,7 @@ jobs:
         ports:
           - 5672:5672
         options: >-
-          --health-cmd "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_listener 5672"
+          --health-cmd "su-exec rabbitmq rabbitmq-diagnostics -q check_running && su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 5672"
           --health-interval 5s
           --health-timeout 10s
           --health-retries 12
@@ -83,3 +83,39 @@ jobs:
 
       - name: Run tests
         run: poetry run pytest -q
+
+  docker-smoke-and-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: postgresql+asyncpg://unused:unused@localhost/unused
+      RABBITMQ_URL: amqp://unused:unused@localhost/
+      API_KEY: ci-docker-key
+      RUN_DOCKER_SMOKE: "1"
+      RUN_E2E: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.1.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Run isolated Compose checks
+        shell: bash
+        run: |
+          set -o pipefail
+          poetry run pytest -v --capture=tee-sys tests/smoke tests/e2e 2>&1 | tee docker-tests.log
+      - name: Upload Docker test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-logs
+          path: docker-tests.log
