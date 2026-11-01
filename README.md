@@ -837,3 +837,7 @@ CI запускает Docker smoke/e2e отдельным job с `RUN_DOCKER_SMO
 Команды, query, результаты и порты находятся в `application`. SQLAlchemy-репозитории называются `SqlAlchemyPaymentRepository` и `SqlAlchemyOutboxRepository`; совместимые алиасы и модули `services.contracts`/`services.ports` удалены.
 
 `RabbitEventPublisher` использует общую подтверждённую публикацию `topology.publish_payment_event`: persistent, mandatory, ограничение времени и проверку `Basic.Ack`. Объявление топологии выполняется отдельно.
+
+Webhook transport разрешает только публичные unicast IPv4/IPv6. Все DNS-адреса проверяются при создании подключения; сокет открывается по проверенному числовому адресу, при этом Host и TLS SNI сохраняют исходное имя. Повторное подключение заново применяет политику. Redirect и proxy из окружения отключены. URL с credentials отклоняются.
+
+Production по умолчанию запрещает loopback, private, link-local, reserved и multicast. Для локального приёмника требуется `APP_ENV=local` или `test` и явный JSON-список `WEBHOOK_ALLOWED_PRIVATE_HOSTS=["webhook-receiver"]`. Production отклоняет такую конфигурацию. Изолированные Compose-тесты разрешают только свой приёмник. Смена окружения требует перезапуска процесса.

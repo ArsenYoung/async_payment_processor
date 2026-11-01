@@ -7,8 +7,10 @@ from typing import Self
 
 import httpx
 
+from payment_processor.adapters.webhook_transport import RestrictedWebhookTransport
 from payment_processor.application.ports import WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
+from payment_processor.core.config import settings
 from payment_processor.core.logging import processing_fields
 from payment_processor.messaging.schemas import PaymentResultPayload
 
@@ -36,7 +38,12 @@ class WebhookClient(WebhookSender):
             raise ValueError("Webhook request deadline must be positive and finite")
         self._request_deadline = request_deadline
         self._client = httpx.AsyncClient(
-            timeout=timeout, transport=transport, follow_redirects=False
+            timeout=timeout,
+            transport=transport
+            if transport is not None
+            else RestrictedWebhookTransport(settings.webhook_allowed_private_hosts),
+            follow_redirects=False,
+            trust_env=False,
         )
 
     async def __aenter__(self) -> Self:

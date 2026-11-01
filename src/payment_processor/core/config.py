@@ -1,10 +1,12 @@
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: Literal["production", "local", "test"] = "production"
+    webhook_allowed_private_hosts: list[str] = Field(default_factory=list)
     database_url: str
     rabbitmq_url: str
     api_key: str
@@ -25,6 +27,12 @@ class Settings(BaseSettings):
         extra="ignore",
         hide_input_in_errors=True,
     )
+
+    @model_validator(mode="after")
+    def restrict_private_webhooks(self) -> "Settings":
+        if self.app_env == "production" and self.webhook_allowed_private_hosts:
+            raise ValueError("Private webhook hosts require APP_ENV=local or test")
+        return self
 
     @field_validator("log_level", mode="before")
     @classmethod
