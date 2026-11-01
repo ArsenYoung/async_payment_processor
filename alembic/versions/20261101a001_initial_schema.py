@@ -4,7 +4,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "fd381d9e8e93"
+revision: str = "20261101a001"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -56,6 +56,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("webhook_delivered_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("processing_token", sa.UUID(), nullable=True),
+        sa.Column("processing_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("webhook_token", sa.UUID(), nullable=True),
+        sa.Column("webhook_until", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint("amount > 0", name=op.f("ck_payments_amount_positive")),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_payments")),
         sa.UniqueConstraint("idempotency_key", name="uq_payments_idempotency_key"),
@@ -78,6 +83,10 @@ def upgrade() -> None:
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("attempts", sa.Integer(), server_default="0", nullable=False),
         sa.Column("last_error", sa.Text(), nullable=True),
+        sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("quarantined_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("publication_token", sa.UUID(), nullable=True),
+        sa.Column("publication_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -103,8 +112,16 @@ def upgrade() -> None:
         unique=False,
     )
 
+    op.create_index(
+        "ix_outbox_available_created",
+        "outbox",
+        ["created_at", "id"],
+        postgresql_where=sa.text("published_at IS NULL AND quarantined_at IS NULL"),
+    )
+
 
 def downgrade() -> None:
+    op.drop_index("ix_outbox_available_created", table_name="outbox")
     op.drop_index("ix_outbox_unpublished_created", table_name="outbox")
     op.drop_index("ix_outbox_payment_id", table_name="outbox")
     op.drop_table("outbox")
