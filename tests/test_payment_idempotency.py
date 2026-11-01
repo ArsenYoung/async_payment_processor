@@ -19,6 +19,8 @@ from payment_processor.db.models import Outbox, OutboxEventType, Payment
 from payment_processor.db.repositories.payments import PaymentRepository
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_repeated_request_returns_same_payment(

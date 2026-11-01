@@ -57,6 +57,7 @@ def expected_payload(completed_payment: Payment) -> dict:
     }
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [200, 201, 202, 204, 299])
 async def test_webhook_posts_result_and_reuses_client(
@@ -89,6 +90,7 @@ async def test_webhook_posts_result_and_reuses_client(
         }
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 async def test_webhook_sends_saved_payment_result(
@@ -121,6 +123,7 @@ async def test_webhook_sends_saved_payment_result(
     assert json.loads(requests[0].content) == expected_payload
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("currency", list(PaymentCurrency))
 def test_webhook_payload_preserves_currency_and_decimal(
     completed_payment: Payment, currency: PaymentCurrency
@@ -136,6 +139,7 @@ def test_webhook_payload_preserves_currency_and_decimal(
     assert payload.model_dump(mode="json")["amount"] == "10.50"
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("field", "value"),
@@ -161,6 +165,7 @@ async def test_incomplete_result_is_rejected_before_sending(
     handle.assert_not_awaited()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [100, 301, 302, 307, 400, 404, 429, 500, 503])
 async def test_non_success_response_propagates_without_redirect_or_retry(
@@ -183,6 +188,7 @@ async def test_non_success_response_propagates_without_redirect_or_retry(
     handle.assert_awaited_once()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "error_type",
@@ -211,6 +217,7 @@ async def test_network_failure_propagates_without_retry(
     handle.assert_awaited_once()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [None, "http", "network", "cancellation"])
 async def test_client_closes_transport_on_exit(
@@ -247,6 +254,7 @@ async def test_client_closes_transport_on_exit(
         await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_webhook_request_deadline_covers_slow_response_headers(
     completed_payment: Payment,
@@ -264,6 +272,7 @@ async def test_webhook_request_deadline_covers_slow_response_headers(
             await client.send(PaymentDetailsResult.from_payment(completed_payment))
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_webhook_stream_does_not_consume_unused_large_response_body(
     completed_payment: Payment,
@@ -293,6 +302,7 @@ async def test_webhook_stream_does_not_consume_unused_large_response_body(
     assert response_stream.closed
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "timeout", [0, -0.1, float("nan"), float("inf"), float("-inf")]
 )
@@ -311,6 +321,7 @@ def test_webhook_timeout_rejects_invalid_values(timeout: float) -> None:
         WebhookClient(timeout=timeout)
 
 
+@pytest.mark.unit
 def test_webhook_timeout_default_and_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -326,6 +337,7 @@ def test_webhook_timeout_default_and_environment(
     assert Settings(**values).webhook_timeout == 2.5
 
 
+@pytest.mark.unit
 def test_webhook_request_deadline_default_and_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -341,6 +353,7 @@ def test_webhook_request_deadline_default_and_environment(
     assert Settings(**values).webhook_request_deadline == 2.5
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["response_lost", "server_error"])
 async def test_delivery_id_survives_retry_with_new_client_and_receiver_deduplicates(
@@ -379,6 +392,7 @@ async def test_delivery_id_survives_retry_with_new_client_and_receiver_deduplica
     assert requests[0].content == requests[1].content
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_different_payments_have_distinct_delivery_ids(
     completed_payment: Payment,

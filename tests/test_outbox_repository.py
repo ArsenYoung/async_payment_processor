@@ -15,6 +15,8 @@ from payment_processor.db.models import (
 from payment_processor.db.repositories.outbox import OutboxRepository
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_empty_outbox_returns_no_events(outbox_database: Database) -> None:

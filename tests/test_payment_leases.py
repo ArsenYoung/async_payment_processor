@@ -10,6 +10,8 @@ from payment_processor.application import payment_leases
 from payment_processor.application.errors import LeaseBusyError
 from payment_processor.domain.payment import Payment, PaymentCurrency
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def payment() -> Payment:

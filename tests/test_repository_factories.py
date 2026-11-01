@@ -21,6 +21,8 @@ from payment_processor.db.repositories.factories import (
     payment_repository_scope,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def integrity_error(sqlstate: str | None, constraint: str | None) -> IntegrityError:
     cause = Exception("constraint violation")

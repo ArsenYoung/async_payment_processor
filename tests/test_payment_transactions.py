@@ -17,6 +17,8 @@ from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.domain.payment import PaymentCurrency
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_outbox_insert_failure_rolls_back_payment_and_allows_retry(

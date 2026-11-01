@@ -107,6 +107,23 @@ poetry run python -m payment_processor.rabbitmq_to_payment_worker.main
 poetry run ruff check .
 poetry run ruff format --check .
 poetry run mypy
+```
+
+Каждый тест имеет ровно один уровень: `unit`, `integration`, `smoke` или `e2e`. Pytest проверяет марки при сборе.
+
+| Уровень | Команда | Зависимости |
+| --- | --- | --- |
+| Application unit | `poetry run pytest -q tests/unit` | Без `.env` и внешних сервисов; fake-порты и mock |
+| Все unit | `poetry run pytest -q -m unit` | Тестовые настройки для импорта смешанных модулей; внешние сервисы не нужны |
+| Integration | `poetry run pytest -q -m integration` | Тестовые PostgreSQL/RabbitMQ и миграции |
+| Smoke | `RUN_DOCKER_SMOKE=1 poetry run pytest -q -m smoke` | Docker: запуск, миграции, сохранность данных |
+| E2E | `RUN_E2E=1 poetry run pytest -q -m e2e` | Docker: полный поток платежа и webhook |
+
+Для сбора смешанных модулей задайте `DATABASE_URL`, `RABBITMQ_URL`, `API_KEY` через окружение или `.env`; для unit допустимы адреса недоступных сервисов. Fake-хранилище проверяет последовательные сценарии и rollback; конкурентность и блокировки проверяются с PostgreSQL. Контрактные тесты сопоставляют fake и SQLAlchemy, проверяют подтверждение публикации и поведение HTTP-клиента.
+
+Полный unit/integration-прогон и отдельные Docker-прогоны:
+
+```bash
 poetry run pytest -q
 RUN_DOCKER_SMOKE=1 poetry run pytest -q tests/smoke
 RUN_E2E=1 poetry run pytest -q tests/e2e

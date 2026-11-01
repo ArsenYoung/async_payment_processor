@@ -70,6 +70,7 @@ def read_logs(output: StringIO) -> str:
     return captured
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_payment_requests_have_unique_request_ids_and_saved_payment_id(
     logging_client: AsyncClient,
@@ -106,6 +107,7 @@ async def test_payment_requests_have_unique_request_ids_and_saved_payment_id(
         assert "exception" not in entry
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "method,path,authenticated,body,expected_status",
@@ -147,6 +149,7 @@ async def test_request_context_covers_success_authentication_and_validation(
     assert "payment_id" not in entry
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_conflicting_creation_logs_409_without_request_body(
     logging_client: AsyncClient,
@@ -170,6 +173,7 @@ async def test_conflicting_creation_logs_409_without_request_body(
     assert "private-conflicting-description" not in captured
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_unhandled_error_keeps_request_context_and_safe_traceback(
     logging_application: FastAPI,
@@ -210,6 +214,7 @@ async def test_unhandled_error_keeps_request_context_and_safe_traceback(
     assert "exception" not in next_entry
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("valid_request", [True, False])
 async def test_queries_headers_and_bodies_are_not_logged(
@@ -246,6 +251,7 @@ async def test_queries_headers_and_bodies_are_not_logged(
     assert "webhook_url" not in captured
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_parallel_requests_keep_their_own_payment_and_request_ids(
     logging_client: AsyncClient,
@@ -293,6 +299,7 @@ async def test_parallel_requests_keep_their_own_payment_and_request_ids(
     assert [response.status_code for response in fetched] == [200, 200, 200, 404]
 
 
+@pytest.mark.unit
 def test_formatter_serializes_only_allowed_request_fields() -> None:
     record = logging.makeLogRecord(
         {
@@ -317,6 +324,7 @@ def test_formatter_serializes_only_allowed_request_fields() -> None:
     assert not {"metadata", "headers", "payload"} & entry.keys()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_non_http_scopes_pass_through_without_request_logging(
     capsys: pytest.CaptureFixture[str],

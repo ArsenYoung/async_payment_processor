@@ -8,6 +8,8 @@ from payment_processor.domain.validation import (
     validate_webhook_url,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("amount", ["0.01", "10.5000", "9999999999999999.99"])
 def test_amount_accepts_database_precision(amount: str) -> None:

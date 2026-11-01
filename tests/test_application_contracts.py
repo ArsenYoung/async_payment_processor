@@ -1,6 +1,10 @@
 import subprocess
 import sys
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_application_contracts_import_without_frameworks_or_adapters() -> None:
     result = subprocess.run(

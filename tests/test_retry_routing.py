@@ -75,6 +75,7 @@ async def receive(
     return message
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "headers, expected",
     [
@@ -90,12 +91,14 @@ def test_attempt_header_accepts_only_valid_attempts(
     assert read_attempt(headers) == expected
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("attempt", [0, -1, 4, True, False, "2", 2.0, None, [], {}])
 def test_invalid_attempt_header_is_rejected(attempt: object) -> None:
     with pytest.raises(ValueError, match="Attempt must be an integer"):
         read_attempt({ATTEMPT_HEADER: attempt})
 
 
+@pytest.mark.unit
 def test_retry_topology_uses_durable_routes_and_confirmed_dead_lettering() -> None:
     for attempt in (2, 3):
         queue = topology.retry_queue(attempt)
@@ -118,6 +121,7 @@ def test_retry_topology_uses_durable_routes_and_confirmed_dead_lettering() -> No
     assert topology.dead_letter_queue().durable is True
 
 
+@pytest.mark.unit
 def test_diagnostics_preserve_headers_without_copying_sensitive_exception_text() -> (
     None
 ):
@@ -148,6 +152,7 @@ def test_diagnostics_preserve_headers_without_copying_sensitive_exception_text()
     assert "sensitive" not in str(headers)
 
 
+@pytest.mark.unit
 def test_database_diagnostics_include_sqlstate_and_remove_stale_http_status() -> None:
     original = RuntimeError("password=secret")
     original.sqlstate = "40001"
@@ -163,6 +168,7 @@ def test_database_diagnostics_include_sqlstate_and_remove_stale_http_status() ->
     assert "secret" not in str(headers)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry", [RetryAttempt(2, 0.1), RetryAttempt(3, 0.2), None])
 async def test_failed_publication_preserves_identity_and_persistent_delivery(
@@ -193,6 +199,7 @@ async def test_failed_publication_preserves_identity_and_persistent_delivery(
     assert args.kwargs["expiration"] == (retry.delay if retry else None)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry", [RetryAttempt(2, 0.1), None])
 @pytest.mark.parametrize("confirmation", [None, Basic.Nack(), Basic.Reject()])
@@ -212,6 +219,7 @@ async def test_failed_publication_requires_positive_confirmation(
         )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_failed_publication_has_a_bounded_confirmation_wait(
     payment_message: RabbitMessage,
@@ -240,6 +248,7 @@ async def test_failed_publication_has_a_bounded_confirmation_wait(
     assert cancelled.is_set()
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["processing", "delivery"])
 @pytest.mark.parametrize(
@@ -298,6 +307,7 @@ async def test_subscriber_acks_only_after_confirmed_transfer(
     assert transfer.await_args.kwargs["headers"]["x-payment-failed-attempt"] == attempt
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("attempt", [1, 3])
 @pytest.mark.parametrize(
@@ -348,6 +358,7 @@ async def test_transfer_failure_nacks_original_without_ack(
     nack.assert_awaited_once_with(multiple=False, requeue=True)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "body,headers",
@@ -399,6 +410,7 @@ async def test_invalid_messages_reach_dlq_without_processing(
         )
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["processing", "transfer"])
 async def test_cancellation_does_not_ack_or_route_as_processing_failure(
@@ -433,6 +445,7 @@ async def test_cancellation_does_not_ack_or_route_as_processing_failure(
     assert transfer.await_count == (0 if stage == "processing" else 1)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("attempt,delay", [(2, 0.1), (3, 0.2)])
 async def test_real_retry_waits_then_returns_persistent_event(
@@ -465,6 +478,7 @@ async def test_real_retry_waits_then_returns_persistent_event(
         assert message.expiration is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [TimeoutError, LeaseBusyError])
 async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
@@ -504,6 +518,7 @@ async def test_real_subscriber_exhausts_three_attempts_then_routes_to_dlq(
     service.deliver_webhook.assert_not_awaited()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry", [RetryAttempt(2, 0.1), None])
 async def test_real_unroutable_transfer_is_rejected(
@@ -528,6 +543,7 @@ async def test_real_unroutable_transfer_is_rejected(
         )
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("attempt", [1, 3])
 async def test_real_transfer_failure_preserves_original_for_redelivery(
@@ -584,6 +600,7 @@ async def test_real_transfer_failure_preserves_original_for_redelivery(
         assert message.headers[ATTEMPT_HEADER] == attempt
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_expired_retry_waits_for_main_route_to_be_restored(
     routing_broker: RabbitBroker, payment_message: RabbitMessage
@@ -613,6 +630,7 @@ async def test_expired_retry_waits_for_main_route_to_be_restored(
         assert message.headers[ATTEMPT_HEADER] == 2
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("max_attempts", [1, 5])
 async def test_topology_declares_queues_for_configured_policy(
@@ -630,6 +648,7 @@ async def test_topology_declares_queues_for_configured_policy(
     ]
 
 
+@pytest.mark.unit
 def test_custom_attempt_limit_is_used_for_headers_and_failure_diagnostics() -> None:
     headers = {ATTEMPT_HEADER: 4}
     assert read_attempt(headers, max_attempts=5) == 4

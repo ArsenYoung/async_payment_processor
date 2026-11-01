@@ -6,6 +6,8 @@ from pydantic import ValidationError
 from payment_processor.core.config import Settings
 from payment_processor.messaging.retry import MAX_ATTEMPTS, RetryPolicy
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture
 def settings_values(monkeypatch: pytest.MonkeyPatch) -> dict:

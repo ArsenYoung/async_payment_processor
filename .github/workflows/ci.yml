@@ -81,8 +81,11 @@ jobs:
       - name: Run migrations
         run: poetry run alembic upgrade head
 
-      - name: Run tests
-        run: poetry run pytest -q
+      - name: Run unit tests
+        run: poetry run pytest -q -m unit
+
+      - name: Run integration tests
+        run: poetry run pytest -q -m integration
 
   migration-lifecycle:
     runs-on: ubuntu-latest

@@ -27,6 +27,8 @@ from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.publisher import RabbitEventPublisher
 from payment_processor.messaging.schemas import PaymentCreatedEvent
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def broker() -> Mock:

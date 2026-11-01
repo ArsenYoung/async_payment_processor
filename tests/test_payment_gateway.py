@@ -5,6 +5,8 @@ import pytest
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.db.models import PaymentStatus
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

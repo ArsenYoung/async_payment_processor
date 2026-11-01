@@ -7,6 +7,8 @@ from sqlalchemy import func, select
 from payment_processor.db.models import Outbox, Payment
 from payment_processor.db.session import Database
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_create_payment_returns_accepted_and_creates_outbox(
