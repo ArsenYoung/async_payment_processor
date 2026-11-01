@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     rabbitmq_url: str
     api_key: str
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    outbox_retention_days: float = Field(default=30, gt=0, allow_inf_nan=False)
+    outbox_cleanup_batch_size: int = Field(default=500, gt=0)
+    outbox_cleanup_interval: float = Field(default=86400, gt=0, allow_inf_nan=False)
     outbox_batch_size: int = Field(default=100, gt=0)
     outbox_poll_interval: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     outbox_publish_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)

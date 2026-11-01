@@ -146,3 +146,11 @@ Prometheus: API экспортирует `/metrics`, каждый worker — `/m
 `payment_outbox_available` и `payment_outbox_oldest_age_seconds` читаются из БД и исключают карантин, отложенные и занятые события. Consumer получает `payment_dlq_messages` из RabbitMQ Management API (`RABBITMQ_MANAGEMENT_URL`) с учётными данными AMQP. `payment_collector_up{source}` сообщает успешность сбора; при 0 предыдущие gauges считаются устаревшими.
 
 Начальные пороги оповещений: collector_up == 0 более минуты; DLQ > 0 более минуты; возраст Outbox > 60 секунд в течение 5 минут; доля failed > 5% за 5 минут при ненулевом трафике; p95 processing/webhook > 5 секунд за 5 минут. Настройте их под нагрузку, используйте rate/histogram_quantile и проверяйте collector_up перед оценкой backlog.
+
+## Эксплуатация
+
+Compose использует `/ready` для API и `python -m payment_processor.core.health` для воркеров. Долгоживущие сервисы имеют `restart: unless-stopped`; ручной stop сохраняет остановку. `migrate` не перезапускается и блокирует зависимые приложения при ошибке. Диагностика RabbitMQ выполняется от пользователя rabbitmq через su-exec, чтобы ранний healthcheck не создавал cookie от root.
+
+Очистка: `python -m payment_processor.operations.outbox_cleanup --dry-run` показывает размер одного пакета. Без dry-run удаляются только опубликованные записи строго старше cutoff, без карантина и любых publication lease-полей. Неопубликованные и захваченные записи сохраняются. SKIP LOCKED и statement timeout 5 секунд ограничивают блокировки.
+
+Настройки: `OUTBOX_RETENTION_DAYS=30`, `OUTBOX_CLEANUP_BATCH_SIZE=500`, `OUTBOX_CLEANUP_INTERVAL=86400`. Периодический запуск: `docker compose --profile maintenance up -d outbox-cleanup`, один пакет при старте и затем по интервалу. `--repeat --dry-run` проверяет расписание без удаления. Дополнительный индекс не добавлялся без подтверждённой необходимости.

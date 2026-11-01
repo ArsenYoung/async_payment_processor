@@ -13,6 +13,7 @@ x-application: &application
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: payments_e2e
@@ -27,6 +28,7 @@ services:
       retries: 60
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: e2e
@@ -36,12 +38,13 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_listener 5672
+        - su-exec rabbitmq rabbitmq-diagnostics -q check_running && su-exec rabbitmq rabbitmq-diagnostics -q check_port_listener 5672
       interval: 2s
       timeout: 10s
       retries: 60
 
   migrate:
+    restart: "no"
     <<: *application
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -49,6 +52,7 @@ services:
         condition: service_healthy
 
   api:
+    restart: unless-stopped
     <<: *application
     command: ["uvicorn", "payment_processor.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -60,7 +64,7 @@ services:
         - -c
         - >-
           import urllib.request;
-          request = urllib.request.Request('http://localhost:8000/health', headers={'X-API-Key': 'e2e-api-key'});
+          request = urllib.request.Request('http://localhost:8000/ready', headers={'X-API-Key': 'e2e-api-key'});
           urllib.request.urlopen(request, timeout=3).close()
       interval: 1s
       timeout: 5s
@@ -70,6 +74,13 @@ services:
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     <<: *application
     command: ["python", "-m", "payment_processor.outbox_to_rabbitmq_worker.main"]
     environment:
@@ -82,6 +93,13 @@ services:
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     <<: *application
     command: ["python", "/app/e2e/consumer.py"]
     environment:
@@ -98,6 +116,13 @@ services:
         condition: service_healthy
 
   rabbitmq-to-payment-worker-smoke:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     <<: *application
     profiles: [smoke]
     command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]

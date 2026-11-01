@@ -121,6 +121,9 @@ def test_clean_startup_and_migrations(smoke_stack: SmokeStack) -> None:
     stack = smoke_stack
     config = json.loads(stack.compose("config", "--format", "json").stdout)
     assert config["name"] == stack.project
+    for name in ("postgres", "rabbitmq", "api", *WORKERS):
+        assert config["services"][name]["restart"] == "unless-stopped"
+    assert config["services"]["migrate"]["restart"] == "no"
     consumer = config["services"]["rabbitmq-to-payment-worker-smoke"]
     assert consumer["command"] == [
         "python",
@@ -222,3 +225,34 @@ def test_clean_startup_and_migrations(smoke_stack: SmokeStack) -> None:
         response = api.get("/health", headers={"X-API-Key": "e2e-api-key"})
         assert response.status_code == 200, response.text
         assert response.json() == {"status": "ok"}
+
+    for worker in WORKERS:
+        container_id = stack.compose("ps", "--quiet", worker).stdout.strip()
+        previous = int(
+            stack.docker(
+                "inspect", "--format", "{{.RestartCount}}", container_id
+            ).stdout
+        )
+        stack.compose(
+            "exec",
+            "--no-TTY",
+            worker,
+            "python",
+            "-c",
+            "import os, signal; os.kill(1, signal.SIGTERM)",
+        )
+        deadline = time.monotonic() + 45
+        while True:
+            state = json.loads(
+                stack.docker("inspect", "--format", "{{json .}}", container_id).stdout
+            )
+            if state["RestartCount"] > previous and state["State"]["Running"]:
+                break
+            assert time.monotonic() < deadline, state["State"]
+            time.sleep(0.2)
+        stack.compose("stop", worker)
+        time.sleep(1)
+        stopped = stack.docker(
+            "inspect", "--format", "{{.State.Running}}", container_id
+        ).stdout.strip()
+        assert stopped == "false"

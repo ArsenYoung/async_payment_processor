@@ -1,5 +1,6 @@
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-payments}
@@ -16,6 +17,7 @@ services:
       retries: 5
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.13-management-alpine
     hostname: rabbitmq
     environment:
@@ -27,12 +29,13 @@ services:
       - "5672:5672"
       - "15672:15672"
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -42,6 +45,7 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      METRICS_PORT: ${METRICS_PORT:-9100}
     ports:
       - "8000:8000"
     healthcheck:
@@ -51,7 +55,7 @@ services:
         - -c
         - >-
           import os, urllib.request;
-          request = urllib.request.Request('http://localhost:8000/health', headers={'X-API-Key': os.environ['API_KEY']});
+          request = urllib.request.Request('http://localhost:8000/ready', headers={'X-API-Key': os.environ['API_KEY']});
           urllib.request.urlopen(request, timeout=3).close()
       interval: 5s
       timeout: 5s
@@ -61,6 +65,13 @@ services:
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     image: payment-processing-worker:local
     build:
       context: .
@@ -71,6 +82,7 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      METRICS_PORT: ${METRICS_PORT:-9100}
       OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-100}
       OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1.0}
       OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
@@ -81,6 +93,13 @@ services:
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
     image: payment-processing-worker:local
     build:
       context: .
@@ -91,8 +110,10 @@ services:
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      METRICS_PORT: ${METRICS_PORT:-9100}
       APP_ENV: ${APP_ENV:-production}
       WEBHOOK_ALLOWED_PRIVATE_HOSTS: ${WEBHOOK_ALLOWED_PRIVATE_HOSTS:-[]}
+      RABBITMQ_MANAGEMENT_URL: ${RABBITMQ_MANAGEMENT_URL:-http://rabbitmq:15672}
       WEBHOOK_TIMEOUT: ${WEBHOOK_TIMEOUT:-5.0}
       WEBHOOK_REQUEST_DEADLINE: ${WEBHOOK_REQUEST_DEADLINE:-5.0}
       RETRY_BASE_DELAY: ${RETRY_BASE_DELAY:-1.0}
@@ -105,7 +126,27 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  outbox-cleanup:
+    profiles: [maintenance]
+    image: payment-processing-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "payment_processor.operations.outbox_cleanup", "--repeat"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      OUTBOX_RETENTION_DAYS: ${OUTBOX_RETENTION_DAYS:-30}
+      OUTBOX_CLEANUP_BATCH_SIZE: ${OUTBOX_CLEANUP_BATCH_SIZE:-500}
+      OUTBOX_CLEANUP_INTERVAL: ${OUTBOX_CLEANUP_INTERVAL:-86400}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   migrate:
+    restart: "no"
     image: payment-processing-app:local
     build:
       context: .

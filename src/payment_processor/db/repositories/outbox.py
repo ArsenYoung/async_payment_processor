@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.application.errors import LeaseLostError
@@ -118,6 +118,30 @@ class SqlAlchemyOutboxRepository(OutboxStore):
         event.quarantined_at = None
         event.next_attempt_at = None
         await self.session.flush()
+
+    async def cleanup_published(
+        self, *, cutoff: datetime, limit: int, dry_run: bool = False
+    ) -> int:
+        if limit <= 0:
+            raise ValueError("Batch limit must be positive")
+        if cutoff.utcoffset() is None:
+            raise ValueError("Retention cutoff must include a timezone")
+        query = (
+            select(Outbox.id)
+            .where(
+                Outbox.published_at < cutoff,
+                Outbox.quarantined_at.is_(None),
+                Outbox.publication_token.is_(None),
+                Outbox.publication_until.is_(None),
+            )
+            .order_by(Outbox.published_at, Outbox.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        identifiers = list((await self.session.scalars(query)).all())
+        if identifiers and not dry_run:
+            await self.session.execute(delete(Outbox).where(Outbox.id.in_(identifiers)))
+        return len(identifiers)
 
 
 OutboxRepository = SqlAlchemyOutboxRepository
