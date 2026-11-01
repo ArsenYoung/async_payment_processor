@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: Literal["production", "local", "test"] = "production"
     webhook_allowed_private_hosts: list[str] = Field(default_factory=list)
+    metrics_port: int = Field(default=9100, ge=1, le=65535)
+    rabbitmq_management_url: str = "http://rabbitmq:15672"
     database_url: str
     rabbitmq_url: str
     api_key: str

@@ -12,6 +12,7 @@ from payment_processor.application.payment_leases import (
 from payment_processor.application.ports import WebhookDeliveryStore, WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import measure
 from payment_processor.domain.payment import InvalidPaymentTransition
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class DeliverPaymentWebhookUseCase:
     ) -> None:
         self._store_scope_factory = store_scope_factory
 
+    @measure("webhook_delivery")
     async def deliver(self, payment_id: UUID, sender: WebhookSender) -> None:
         started = perf_counter()
         fields = processing_fields(

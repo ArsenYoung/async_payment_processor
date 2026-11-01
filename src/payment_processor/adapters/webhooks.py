@@ -12,6 +12,7 @@ from payment_processor.application.ports import WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.config import settings
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import measure
 from payment_processor.messaging.schemas import PaymentResultPayload
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class WebhookClient(WebhookSender):
     ) -> None:
         await self._client.__aexit__(exc_type, exc_value, traceback)
 
+    @measure("webhook_http")
     async def send(self, payment: PaymentDetailsResult) -> None:
         started = perf_counter()
         fields = processing_fields(

@@ -25,7 +25,7 @@ export API_KEY='ваш-ключ-из-.env'
 curl -H "X-API-Key: $API_KEY" http://localhost:8000/health
 ```
 
-Все эндпоинты, включая `/health`, `/docs`, `/redoc`, `/docs/oauth2-redirect` и `/openapi.json`, требуют `X-API-Key`; отсутствующий или неверный ключ даёт `401`. Для загрузки страницы документации передайте заголовок через клиент или расширение браузера. HTML содержит OpenAPI-схему. Для API-запросов из Swagger введите ключ через **Authorize**.
+Все эндпоинты, включая `/health`, `/docs`, `/redoc`, `/docs/oauth2-redirect` и `/openapi.json`, требуют `X-API-Key`; отсутствующий или неверный ключ даёт `401`. При открытии `/docs` или `/redoc` браузер показывает форму ввода ключа с HTTP 401. После проверки ключ хранится в sessionStorage вкладки и передаётся заголовком. HTML содержит OpenAPI-схему; запросы Swagger автоматически получают ключ, либо используют **Authorize** при загрузке документации внешним клиентом. Ключ отсутствует в URL и HTML.
 
 Остановка: `docker compose down`. Именованные тома сохраняют данные PostgreSQL и RabbitMQ; `down --volumes` удаляет их.
 
@@ -136,3 +136,13 @@ RUN_E2E=1 poetry run pytest -q tests/e2e
 Сценарии и порты находятся в `application`, сущность и инварианты — в `domain`, адаптеры — в `db`, `messaging` и `adapters`; сборка зависимостей — в `bootstrap.py`.
 
 Подробности: [транзакции и leases](docs/transaction-boundaries.md), [Outbox и восстановление](docs/outbox.md), [retry и DLQ](docs/retry-and-dlq.md), [контракт webhook](docs/webhook-delivery.md), [логи и диагностика](docs/diagnostics.md).
+
+## Readiness и метрики
+
+`GET /health` остаётся дешёвой liveness. `GET /ready` проверяет БД с таймаутом 2 секунды и возвращает 503 при потере готовности. Оба маршрута защищены ключом. Воркеры каждые 2 секунды проверяют БД и RabbitMQ; publisher также контролирует продвижение цикла, consumer — состояние подписки. Здоровый idle остаётся готовым. `python -m payment_processor.core.health` отклоняет состояние старше 10 секунд; при остановке файл состояния удаляется.
+
+Prometheus: API экспортирует `/metrics`, каждый worker — `/metrics` на внутреннем порту `METRICS_PORT=9100`, с `X-API-Key`. Настройте отдельные scrape targets; worker-порты не опубликованы на хост. Счётчики `payment_operations_total{operation,outcome}` и histogram `payment_operation_duration_seconds` покрывают processing, publication, webhook_delivery и webhook_http. Нет labels с идентификаторами платежей, событий, URL и секретами.
+
+`payment_outbox_available` и `payment_outbox_oldest_age_seconds` читаются из БД и исключают карантин, отложенные и занятые события. Consumer получает `payment_dlq_messages` из RabbitMQ Management API (`RABBITMQ_MANAGEMENT_URL`) с учётными данными AMQP. `payment_collector_up{source}` сообщает успешность сбора; при 0 предыдущие gauges считаются устаревшими.
+
+Начальные пороги оповещений: collector_up == 0 более минуты; DLQ > 0 более минуты; возраст Outbox > 60 секунд в течение 5 минут; доля failed > 5% за 5 минут при ненулевом трафике; p95 processing/webhook > 5 секунд за 5 минут. Настройте их под нагрузку, используйте rate/histogram_quantile и проверяйте collector_up перед оценкой backlog.

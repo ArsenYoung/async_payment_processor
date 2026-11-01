@@ -92,3 +92,104 @@ def test_payment_flow(payment_stack, status: str) -> None:
         final = api.get(f"/api/v1/payments/{payment_id}")
         assert final.status_code == 200, final.text
         assert final.json() == payment
+
+
+def worker_metrics(stack, worker):
+    return stack.compose(
+        "exec",
+        "--no-TTY",
+        worker,
+        "python",
+        "-c",
+        "import urllib.request; "
+        "request = urllib.request.Request('http://127.0.0.1:9100/metrics', "
+        "headers={'X-API-Key': 'e2e-api-key'}); "
+        "print(urllib.request.urlopen(request, timeout=5).read().decode())",
+    ).stdout
+
+
+def metric_value(body, name, **labels):
+    from prometheus_client.parser import text_string_to_metric_families
+
+    return next(
+        sample.value
+        for family in text_string_to_metric_families(body)
+        for sample in family.samples
+        if sample.name == name and sample.labels == labels
+    )
+
+
+def test_runtime_metrics_and_dependency_readiness(docker_stack):
+    stack = docker_stack
+    stack.start_consumer("succeeded")
+    publisher = "outbox-to-rabbitmq-worker"
+    consumer = "rabbitmq-to-payment-worker"
+    published = worker_metrics(stack, publisher)
+    consumed = worker_metrics(stack, consumer)
+    assert metric_value(published, "payment_collector_up", source="outbox") == 1
+    assert (
+        metric_value(
+            published,
+            "payment_operations_total",
+            operation="publication",
+            outcome="success",
+        )
+        >= 2
+    )
+    assert metric_value(consumed, "payment_collector_up", source="rabbitmq") == 1
+    assert metric_value(consumed, "payment_dlq_messages") == 0
+    assert "e2e-api-key" not in published + consumed
+
+    def ready(worker):
+        return (
+            stack.compose(
+                "exec",
+                "--no-TTY",
+                worker,
+                "python",
+                "-c",
+                "from payment_processor.core.health import healthy; print(healthy())",
+            ).stdout.strip()
+            == "True"
+        )
+
+    def wait_workers(expected):
+        deadline = time.monotonic() + 45
+        while not all(ready(worker) == expected for worker in (publisher, consumer)):
+            assert time.monotonic() < deadline, (
+                f"Workers did not reach readiness {expected}"
+            )
+            time.sleep(0.5)
+
+    with httpx.Client(
+        base_url=stack.api_url,
+        headers={"X-API-Key": "e2e-api-key"},
+        trust_env=False,
+        timeout=5,
+    ) as api:
+        wait_workers(True)
+        assert api.get("/ready").status_code == 200
+        stack.compose("stop", "postgres")
+        try:
+            wait_workers(False)
+            assert api.get("/ready").status_code == 503
+            assert api.get("/health").status_code == 200
+        finally:
+            stack.compose("up", "--detach", "--no-deps", "--wait", "postgres")
+        wait_workers(True)
+        assert api.get("/ready").status_code == 200
+        stack.compose("stop", "rabbitmq")
+        try:
+            wait_workers(False)
+            assert api.get("/ready").status_code == 200
+        finally:
+            stack.compose("up", "--detach", "--no-deps", "--wait", "rabbitmq")
+        wait_workers(True)
+        assert (
+            metric_value(
+                worker_metrics(stack, consumer),
+                "payment_collector_up",
+                source="rabbitmq",
+            )
+            == 1
+        )

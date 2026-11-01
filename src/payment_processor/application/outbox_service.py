@@ -5,13 +5,14 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from time import perf_counter
+from time import monotonic, perf_counter
 from uuid import UUID, uuid4
 
 from payment_processor.application.errors import PersistenceUnavailableError
 from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
 from payment_processor.application.ports import EventPublisher, OutboxStore
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import record_operation
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +34,13 @@ class OutboxService:
         self._store_scope_factory = store_scope_factory
         self._publisher = publisher
         self._queue_name = queue_name
+        self.last_progress = monotonic()
 
     async def run(
         self, *, batch_size: int, poll_interval: float, publish_timeout: float
     ) -> None:
         while True:
+            self.last_progress = monotonic()
             try:
                 result = await self.publish_batch(batch_size, timeout=publish_timeout)
             except (PersistenceUnavailableError, OSError) as error:
@@ -59,6 +62,7 @@ class OutboxService:
                     )
                 elif result.published:
                     logger.info("Outbox batch: %d published", result.published)
+            self.last_progress = monotonic()
             await asyncio.sleep(poll_interval)
 
     async def publish_batch(
@@ -74,6 +78,9 @@ class OutboxService:
         context: dict[str, object] = {"operation": "outbox_poll"}
         try:
             for _ in range(limit):
+                self.last_progress = monotonic()
+                started = perf_counter()
+                failure: Exception | None = None
                 token = uuid4()
                 finalized = False
                 record: OutboxRecord | None = None
@@ -86,7 +93,6 @@ class OutboxService:
                         finalized = True
                         break
                     seen.append(record.id)
-                    started = perf_counter()
                     context = processing_fields(
                         operation="outbox_publish",
                         payment_id=str(record.payment_id),
@@ -94,7 +100,6 @@ class OutboxService:
                         queue=self._queue_name,
                         publication_attempt=record.attempts + 1,
                     )
-                    failure: Exception | None = None
                     invalid = False
                     try:
                         event = PaymentCreatedEvent.from_outbox(record)
@@ -143,6 +148,12 @@ class OutboxService:
                         published += 1
                         logger.info("Outbox event published", extra=fields)
                 finally:
+                    if record is not None:
+                        record_operation(
+                            "publication",
+                            started,
+                            failed=not finalized or failure is not None,
+                        )
                     if not finalized and record is not None:
                         try:
                             async with self._store_scope_factory() as repository:
