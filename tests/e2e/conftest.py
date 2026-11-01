@@ -26,6 +26,8 @@ class DockerStack:
                 "compose",
                 "--file",
                 str(ROOT / "docker-compose.test.yml"),
+                "--env-file",
+                os.devnull,
                 "--project-name",
                 self.project,
                 *arguments,
@@ -64,7 +66,14 @@ class DockerStack:
 def docker_stack() -> Iterator[DockerStack]:
     if os.environ.get("RUN_E2E") != "1":
         pytest.skip("Set RUN_E2E=1 to start the isolated Docker payment stack")
-    stack = DockerStack(f"payment-e2e-{uuid4().hex[:12]}", dict(os.environ))
+    stack = DockerStack(
+        f"payment-e2e-{uuid4().hex[:12]}",
+        {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("COMPOSE_")
+        },
+    )
     stack.environment["COMPOSE_PROJECT_NAME"] = stack.project
     try:
         stack.compose(
@@ -86,7 +95,10 @@ def docker_stack() -> Iterator[DockerStack]:
         stack.receiver_url = stack.url("webhook-receiver")
         yield stack
     except BaseException:
-        print(stack.compose("logs", "--no-color", "--tail", "100").stdout)
+        try:
+            print(stack.compose("logs", "--no-color", "--tail", "100").stdout)
+        except Exception as error:
+            print(f"Unable to collect Compose logs: {error}")
         raise
     finally:
         stack.compose("down", "--volumes", "--remove-orphans", "--rmi", "local")

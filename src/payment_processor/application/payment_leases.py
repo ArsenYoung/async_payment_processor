@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from uuid import UUID, uuid4
@@ -26,6 +27,7 @@ async def payment_lease(
     claimed = False
     wait = asyncio.timeout(LEASE_WAIT_SECONDS)
     try:
+        delay = LEASE_POLL_INTERVAL
         try:
             async with wait:
                 while True:
@@ -39,7 +41,8 @@ async def payment_lease(
                         )
                     if not needed or claimed:
                         break
-                    await asyncio.sleep(LEASE_POLL_INTERVAL)
+                    await asyncio.sleep(random.uniform(delay / 2, delay))
+                    delay = min(1.0, delay * 2)
         except TimeoutError as error:
             if wait.expired():
                 raise LeaseBusyError(
@@ -50,7 +53,8 @@ async def payment_lease(
     finally:
         if claimed:
             try:
-                async with scope() as repository:
-                    await repository.release_lease(payment_id, operation, token)
+                async with asyncio.timeout(2):
+                    async with scope() as repository:
+                        await repository.release_lease(payment_id, operation, token)
             except Exception:
                 logger.exception("Payment lease cleanup failed; lease will expire")

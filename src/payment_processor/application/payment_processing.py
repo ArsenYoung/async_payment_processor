@@ -13,6 +13,7 @@ from payment_processor.application.payment_leases import (
 from payment_processor.application.ports import PaymentGateway, PaymentProcessingStore
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import measure
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class ProcessPaymentUseCase:
         self._store_scope_factory = store_scope_factory
         self._gateway = gateway
 
+    @measure("processing")
     async def process(self, payment_id: UUID) -> PaymentDetailsResult:
         started = perf_counter()
         fields = processing_fields(

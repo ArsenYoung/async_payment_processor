@@ -148,6 +148,8 @@ def persistence_stack(tmp_path: Path) -> Iterator[PersistenceStack]:
         RABBITMQ_USER="persistence",
         RABBITMQ_PASSWORD="persistence-password",
         API_KEY=API_KEY,
+        APP_ENV="test",
+        WEBHOOK_ALLOWED_PRIVATE_HOSTS='["webhook-receiver"]',
         OUTBOX_BATCH_SIZE="100",
         OUTBOX_POLL_INTERVAL="0.1",
         OUTBOX_PUBLISH_TIMEOUT="5",

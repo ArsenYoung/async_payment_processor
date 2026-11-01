@@ -298,3 +298,48 @@ async def test_documentation_embeds_schema_without_unauthenticated_fetch(
     assert '"/api/v1/payments"' in response.text
     assert "url: '/openapi.json'" not in response.text
     assert 'spec-url="/openapi.json"' not in response.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_swagger_bootstrap_and_schema_use_header_authentication(applications):
+    async with AsyncClient(
+        transport=ASGITransport(app=applications[0]), base_url="http://test"
+    ) as client:
+        login = await client.get("/docs")
+        assert login.status_code == 401
+        assert 'type="password"' in login.text
+        assert "headers: {'X-API-Key': key}" in login.text
+        page = await client.get("/docs", headers={"X-API-Key": settings.api_key})
+        assert "requestInterceptor" in page.text
+        assert "request.headers['X-API-Key']" in page.text
+        assert settings.api_key not in page.text
+        schema = await client.get(
+            "/openapi.json", headers={"X-API-Key": settings.api_key}
+        )
+        assert schema.json()["paths"]["/health"]["get"]["security"] == [{"APIKey": []}]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_readiness_checks_database_and_recovers():
+    database = Mock(spec=Database)
+    application = create_app(database)
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        assert (await client.get("/ready")).status_code == 401
+        for failure, expected in [
+            (None, 200),
+            (RuntimeError("secret database URL"), 503),
+            (None, 200),
+        ]:
+            database.check_connection.side_effect = failure
+            response = await client.get(
+                "/ready", headers={"X-API-Key": settings.api_key}
+            )
+            assert response.status_code == expected
+            assert "secret" not in response.text
+        assert (
+            await client.get("/health", headers={"X-API-Key": settings.api_key})
+        ).status_code == 200

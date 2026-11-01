@@ -117,3 +117,45 @@ async def test_cancellation_during_lease_wait_does_not_release_other_owner(
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     repository.release_lease.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_lease_backoff_reduces_polling_and_reuses_completed_work(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from payment_processor.application import payment_leases
+
+    saved = SimpleNamespace(id=uuid4(), pending=True)
+    store = AsyncMock()
+    store.find_by_id_for_update.return_value = saved
+    store.claim_lease.return_value = False
+    active = False
+    pauses = []
+
+    @asynccontextmanager
+    async def scope():
+        nonlocal active
+        active = True
+        try:
+            yield store
+        finally:
+            active = False
+
+    async def pause(delay):
+        assert not active
+        pauses.append(delay)
+        if len(pauses) == 6:
+            saved.pending = False
+
+    monkeypatch.setattr(payment_leases, "LEASE_POLL_INTERVAL", 0.05)
+    monkeypatch.setattr(payment_leases.asyncio, "sleep", pause)
+    monkeypatch.setattr(payment_leases.random, "uniform", lambda low, high: high)
+    async with payment_leases.payment_lease(
+        scope, saved.id, "processing", lambda payment: payment.pending
+    ) as (payment, token):
+        assert payment is saved
+        assert token is None
+    assert pauses == [0.05, 0.1, 0.2, 0.4, 0.8, 1.0]
+    assert sum(pauses) / 0.05 > store.find_by_id_for_update.await_count * 5

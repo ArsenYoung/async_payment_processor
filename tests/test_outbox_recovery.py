@@ -273,14 +273,14 @@ async def test_invalid_repair_keeps_quarantine_and_original_payload(
     recovery_events: list[Outbox],
     payload_kind: str,
 ) -> None:
-    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
     from payment_processor.operations.outbox_recovery import recover_event
 
     saved = recovery_events[0]
     async with outbox_database.session_scope() as session:
         session.add(saved)
         saved.payload = {**saved.payload, "amount": "invalid"}
-        await OutboxRepository(session).quarantine(saved, "Invalid amount")
+        await SqlAlchemyOutboxRepository(session).quarantine(saved, "Invalid amount")
     replacement = None
     if payload_kind == "invalid":
         replacement = {**saved.payload, "amount": "still-invalid"}
@@ -301,7 +301,7 @@ async def test_recovery_rejects_missing_pending_and_published_events(
     outbox_database: Database,
     recovery_events: list[Outbox],
 ) -> None:
-    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
     from payment_processor.operations.outbox_recovery import recover_event
 
     with pytest.raises(LookupError):
@@ -310,7 +310,7 @@ async def test_recovery_rejects_missing_pending_and_published_events(
         await recover_event(outbox_database, recovery_events[0].id)
     async with outbox_database.session_scope() as session:
         session.add(recovery_events[0])
-        await OutboxRepository(session).mark_published(recovery_events[0])
+        await SqlAlchemyOutboxRepository(session).mark_published(recovery_events[0])
     with pytest.raises(ValueError):
         await recover_event(outbox_database, recovery_events[0].id)
 
@@ -321,12 +321,14 @@ async def test_concurrent_recovery_releases_event_only_once(
     outbox_database: Database,
     recovery_events: list[Outbox],
 ) -> None:
-    from payment_processor.db.repositories.outbox import OutboxRepository
+    from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
     from payment_processor.operations.outbox_recovery import recover_event
 
     async with outbox_database.session_scope() as session:
         session.add(recovery_events[0])
-        await OutboxRepository(session).quarantine(recovery_events[0], "Old error")
+        await SqlAlchemyOutboxRepository(session).quarantine(
+            recovery_events[0], "Old error"
+        )
     async with asyncio.timeout(5):
         results = await asyncio.gather(
             recover_event(outbox_database, recovery_events[0].id),

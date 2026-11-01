@@ -17,7 +17,7 @@ from payment_processor.adapters.webhooks import (
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 
@@ -34,6 +34,7 @@ async def completed_payment(outbox_database: Database) -> Payment:
         idempotency_key=f"test-delivery-{uuid4()}",
         webhook_url="https://example.com/webhook",
         status=PaymentStatus.SUCCEEDED,
+        created_at=datetime(2026, 10, 28, 10, 0, 0, tzinfo=UTC),
         processed_at=datetime(2026, 10, 28, 10, 0, 3, tzinfo=UTC),
     )
     async with outbox_database.session_scope() as session:
@@ -72,7 +73,7 @@ async def test_delivery_mark_is_committed_without_changing_payment_result(
 
     started_at = datetime.now(UTC)
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         payment = await repository.find_by_id_for_update(completed_payment.id)
         assert payment is not None
         await repository.mark_webhook_delivered(payment)
@@ -111,7 +112,7 @@ async def test_repeated_delivery_mark_preserves_original_time(
         payment.webhook_delivered_at = original_time
 
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         payment = await repository.find_by_id_for_update(completed_payment.id)
         assert payment is not None
         await repository.mark_webhook_delivered(payment)
@@ -144,9 +145,14 @@ async def test_incomplete_payment_cannot_be_marked_delivered(
         payment.status = status
         payment.processed_at = processed_at
 
-    with pytest.raises(ValueError, match="requires a completed payment"):
+    expected = (
+        "requires a completed payment"
+        if status == PaymentStatus.PENDING and processed_at is None
+        else "status and processing time disagree"
+    )
+    with pytest.raises(ValueError, match=expected):
         async with outbox_database.session_scope() as session:
-            repository = PaymentRepository(session)
+            repository = SqlAlchemyPaymentRepository(session)
             payment = await repository.find_by_id_for_update(completed_payment.id)
             assert payment is not None
             await repository.mark_webhook_delivered(payment)
@@ -175,7 +181,7 @@ async def test_failed_transaction_rolls_back_delivery_mark_and_allows_retry(
 
     with pytest.raises(type(error)) as caught:
         async with outbox_database.session_scope() as session:
-            repository = PaymentRepository(session)
+            repository = SqlAlchemyPaymentRepository(session)
             payment = await repository.find_by_id_for_update(completed_payment.id)
             assert payment is not None
             await repository.mark_webhook_delivered(payment)
@@ -186,7 +192,7 @@ async def test_failed_transaction_rolls_back_delivery_mark_and_allows_retry(
     assert caught.value is error
 
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         saved = await repository.find_by_id_for_update(completed_payment.id)
         assert saved is not None
         assert saved.webhook_delivered_at is None
@@ -228,7 +234,7 @@ async def test_webhook_failure_preserves_result_without_marking_delivery(
     ) as client:
         with pytest.raises((httpx.HTTPError, WebhookRequestTimeoutError)):
             async with outbox_database.session_scope() as session:
-                repository = PaymentRepository(session)
+                repository = SqlAlchemyPaymentRepository(session)
                 payment = await repository.find_by_id_for_update(completed_payment.id)
                 assert payment is not None
                 await client.send(PaymentDetailsResult.from_payment(payment))
@@ -262,7 +268,7 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
         await release_webhook.wait()
         return httpx.Response(204)
 
-    class WaitingRepository(PaymentRepository):
+    class WaitingRepository(SqlAlchemyPaymentRepository):
         async def find_by_id_for_update(self, payment_id: UUID) -> DomainPayment | None:
             nonlocal waiter_pid
             waiter_pid = await self.session.scalar(select(func.pg_backend_pid()))
@@ -409,7 +415,7 @@ async def test_webhook_lease_expiry_allows_restart_and_fences_old_owner(
 
     old_token = uuid4()
     async with outbox_database.session_scope() as session:
-        repository = PaymentRepository(session)
+        repository = SqlAlchemyPaymentRepository(session)
         assert await repository.claim_lease(
             completed_payment.id, "webhook", old_token, 60
         )
@@ -423,7 +429,7 @@ async def test_webhook_lease_expiry_allows_restart_and_fences_old_owner(
     sender.send.assert_awaited_once()
     with pytest.raises(LeaseLostError):
         async with outbox_database.session_scope() as session:
-            await PaymentRepository(session).verify_lease(
+            await SqlAlchemyPaymentRepository(session).verify_lease(
                 completed_payment.id, "webhook", old_token
             )
 

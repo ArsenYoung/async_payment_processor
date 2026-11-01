@@ -118,9 +118,6 @@ class SqlAlchemyPaymentRepository(PaymentRepositoryPort):
         return to_domain(model)
 
 
-PaymentRepository = SqlAlchemyPaymentRepository
-
-
 def is_idempotency_key_violation(error: IntegrityError) -> bool:
     original = error.orig
     postgres_error = original.__cause__ if original is not None else None
