@@ -24,7 +24,10 @@ from payment_processor.application.commands import (
     DeliverWebhookCommand,
     ProcessPaymentCommand,
 )
-from payment_processor.application.errors import PaymentNotFoundError
+from payment_processor.application.errors import (
+    LeaseContentionError,
+    PaymentNotFoundError,
+)
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentStatus
 from payment_processor.db.session import Database
@@ -35,6 +38,7 @@ from payment_processor.messaging.errors import is_retryable_processing_error
     "error",
     [
         TimeoutError("Gateway timeout"),
+        LeaseContentionError("Payment lease wait limit exceeded"),
         ConnectionError("Gateway unavailable"),
         httpx.ConnectError("Connection failed"),
         httpx.ReadTimeout("Response timeout"),
@@ -273,3 +277,22 @@ async def test_retryable_webhook_error_preserves_gateway_result(
         assert saved.status == status
         assert saved.processed_at == result.processed_at is not None
         assert saved.webhook_delivered_at is None
+
+
+@pytest.mark.parametrize("attempt,expected", [(1, 2), (2, 3), (3, None)])
+def test_lease_contention_enters_retry_then_dead_letter_policy(attempt, expected):
+    from payment_processor.messaging.payment_event_failures import (
+        classify_payment_event_failure,
+    )
+    from payment_processor.messaging.retry import RetryPolicy
+
+    decision = classify_payment_event_failure(
+        LeaseContentionError("Payment lease wait limit exceeded"),
+        message_valid=True,
+        attempt=attempt,
+        retry_policy=RetryPolicy(),
+    )
+    assert (decision.retry.number if decision.retry else None) == expected
+    assert decision.reason == (
+        "attempts_exhausted" if expected is None else "retryable_processing_error"
+    )

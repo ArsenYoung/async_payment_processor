@@ -7,7 +7,10 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 
-from payment_processor.application.errors import PersistenceUnavailableError
+from payment_processor.application.errors import (
+    LeaseContentionError,
+    PersistenceUnavailableError,
+)
 
 
 def is_retryable_processing_error(error: BaseException) -> bool:
@@ -15,6 +18,7 @@ def is_retryable_processing_error(error: BaseException) -> bool:
         error,
         (
             httpx.HTTPError,
+            LeaseContentionError,
             PersistenceUnavailableError,
             TimeoutError,
             ConnectionError,
