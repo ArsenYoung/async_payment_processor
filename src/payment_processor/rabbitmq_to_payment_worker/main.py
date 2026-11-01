@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from payment_processor.adapters.metrics import collect_dlq, metrics_server
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
@@ -58,7 +59,10 @@ async def _consume() -> None:
                     await database.check_connection()
                     return await broker.ping(timeout=1) and subscription_ready()
 
-                async with WorkerHealth(readiness).monitor():
+                async with (
+                    WorkerHealth(readiness).monitor(),
+                    metrics_server(collect_dlq),
+                ):
                     await asyncio.Event().wait()
             finally:
                 await broker.stop()

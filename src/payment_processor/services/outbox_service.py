@@ -12,6 +12,7 @@ from payment_processor.application.errors import PersistenceUnavailableError
 from payment_processor.application.events import OutboxRecord, PaymentCreatedEvent
 from payment_processor.application.ports import EventPublisher, OutboxStore
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import record_operation
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class OutboxService:
         try:
             for _ in range(limit):
                 self.last_progress = monotonic()
+                started = perf_counter()
+                failure: Exception | None = None
                 token = uuid4()
                 finalized = False
                 record: OutboxRecord | None = None
@@ -90,7 +93,6 @@ class OutboxService:
                         finalized = True
                         break
                     seen.append(record.id)
-                    started = perf_counter()
                     context = processing_fields(
                         operation="outbox_publish",
                         payment_id=str(record.payment_id),
@@ -98,7 +100,6 @@ class OutboxService:
                         queue=self._queue_name,
                         publication_attempt=record.attempts + 1,
                     )
-                    failure: Exception | None = None
                     invalid = False
                     try:
                         event = PaymentCreatedEvent.from_outbox(record)
@@ -147,6 +148,12 @@ class OutboxService:
                         published += 1
                         logger.info("Outbox event published", extra=fields)
                 finally:
+                    if record is not None:
+                        record_operation(
+                            "publication",
+                            started,
+                            failed=not finalized or failure is not None,
+                        )
                     if not finalized and record is not None:
                         try:
                             async with self._store_scope_factory() as repository:

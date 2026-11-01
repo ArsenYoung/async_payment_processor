@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from payment_processor.adapters.metrics import collect_outbox, metrics_server
 from payment_processor.core.config import settings
 from payment_processor.core.health import WorkerHealth
 from payment_processor.core.logging import configure_library_logging, configure_logging
@@ -48,7 +49,10 @@ async def _publish() -> None:
                     settings.outbox_publish_timeout + 15,
                 ),
             )
-            async with health.monitor():
+            async with (
+                health.monitor(),
+                metrics_server(lambda: collect_outbox(database)),
+            ):
                 await service.run(
                     batch_size=settings.outbox_batch_size,
                     poll_interval=settings.outbox_poll_interval,

@@ -11,7 +11,9 @@ from fastapi.openapi.docs import (
     get_swagger_ui_oauth2_redirect_html,
 )
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from payment_processor.adapters.metrics import collect_outbox
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.api.dependencies import require_api_key
 from payment_processor.api.exception_handlers import request_validation_error_handler
@@ -75,7 +77,15 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.include_router(payments_router, prefix="/api/v1")
     application.add_api_route("/health", healthcheck, methods=["GET"], tags=["health"])
     application.add_api_route("/ready", readiness, methods=["GET"], tags=["health"])
+    application.add_api_route(
+        "/metrics", metrics, methods=["GET"], include_in_schema=False
+    )
     return application
+
+
+async def metrics(request: Request) -> Response:
+    await collect_outbox(request.app.state.database)
+    return Response(generate_latest(), headers={"Content-Type": CONTENT_TYPE_LATEST})
 
 
 async def readiness(request: Request) -> Response:

@@ -8,6 +8,7 @@ from uuid import UUID
 from payment_processor.application.ports import WebhookDeliveryStore, WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.core.metrics import measure
 from payment_processor.domain.payment import InvalidPaymentTransition
 from payment_processor.services.payment_leases import (
     EXTERNAL_CALL_TIMEOUT,
@@ -26,6 +27,7 @@ class DeliverPaymentWebhookUseCase:
     ) -> None:
         self._store_scope_factory = store_scope_factory
 
+    @measure("webhook_delivery")
     async def deliver(self, payment_id: UUID, sender: WebhookSender) -> None:
         started = perf_counter()
         fields = processing_fields(
