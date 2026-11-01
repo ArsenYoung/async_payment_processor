@@ -154,3 +154,5 @@ Compose использует `/ready` для API и `python -m payment_processor
 Очистка: `python -m payment_processor.operations.outbox_cleanup --dry-run` показывает размер одного пакета. Без dry-run удаляются только опубликованные записи строго старше cutoff, без карантина и любых publication lease-полей. Неопубликованные и захваченные записи сохраняются. SKIP LOCKED и statement timeout 5 секунд ограничивают блокировки.
 
 Настройки: `OUTBOX_RETENTION_DAYS=30`, `OUTBOX_CLEANUP_BATCH_SIZE=500`, `OUTBOX_CLEANUP_INTERVAL=86400`. Периодический запуск: `docker compose --profile maintenance up -d outbox-cleanup`, один пакет при старте и затем по интервалу. `--repeat --dry-run` проверяет расписание без удаления. Дополнительный индекс не добавлялся без подтверждённой необходимости.
+
+SQLAlchemy-репозитории имеют явные имена `SqlAlchemyPaymentRepository` и `SqlAlchemyOutboxRepository`; совместимые алиасы удалены. Use cases, команды и порты остаются в `application`, доменная валидация — в `domain/validation.py`.

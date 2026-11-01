@@ -9,7 +9,7 @@ from sqlalchemy import update
 from payment_processor.application.errors import LeaseLostError
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 
 pytestmark = pytest.mark.integration
@@ -50,7 +50,7 @@ async def test_stale_external_success_cannot_overwrite_new_owner_or_release_its_
                 )
             )
         async with outbox_database.session_scope() as session:
-            repository = PaymentRepository(session)
+            repository = SqlAlchemyPaymentRepository(session)
             assert await repository.claim_lease(payment.id, operation, new_token, 60)
             current = await repository.find_by_id_for_update(payment.id)
             if operation == "processing":

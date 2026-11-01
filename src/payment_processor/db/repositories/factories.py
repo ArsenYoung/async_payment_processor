@@ -9,19 +9,21 @@ from payment_processor.application.errors import (
     PersistenceUnavailableError,
 )
 from payment_processor.db.errors import is_database_unavailable
-from payment_processor.db.repositories.outbox import OutboxRepository
+from payment_processor.db.repositories.outbox import SqlAlchemyOutboxRepository
 from payment_processor.db.repositories.payments import (
-    PaymentRepository,
+    SqlAlchemyPaymentRepository,
     is_idempotency_key_violation,
 )
 
 
 def payment_repository_scope(
     session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-    repository_factory: Callable[[AsyncSession], PaymentRepository] = PaymentRepository,
-) -> Callable[[], AbstractAsyncContextManager[PaymentRepository]]:
+    repository_factory: Callable[
+        [AsyncSession], SqlAlchemyPaymentRepository
+    ] = SqlAlchemyPaymentRepository,
+) -> Callable[[], AbstractAsyncContextManager[SqlAlchemyPaymentRepository]]:
     @asynccontextmanager
-    async def scope() -> AsyncIterator[PaymentRepository]:
+    async def scope() -> AsyncIterator[SqlAlchemyPaymentRepository]:
         try:
             async with session_scope_factory() as session:
                 yield repository_factory(session)
@@ -35,10 +37,12 @@ def payment_repository_scope(
 
 def outbox_repository_scope(
     session_scope_factory: Callable[[], AbstractAsyncContextManager[AsyncSession]],
-    repository_factory: Callable[[AsyncSession], OutboxRepository] = OutboxRepository,
-) -> Callable[[], AbstractAsyncContextManager[OutboxRepository]]:
+    repository_factory: Callable[
+        [AsyncSession], SqlAlchemyOutboxRepository
+    ] = SqlAlchemyOutboxRepository,
+) -> Callable[[], AbstractAsyncContextManager[SqlAlchemyOutboxRepository]]:
     @asynccontextmanager
-    async def scope() -> AsyncIterator[OutboxRepository]:
+    async def scope() -> AsyncIterator[SqlAlchemyOutboxRepository]:
         try:
             async with session_scope_factory() as session:
                 yield repository_factory(session)

@@ -16,7 +16,7 @@ from payment_processor.application.errors import IdempotencyKeyViolationError
 from payment_processor.application.payment_service import PaymentService
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, OutboxEventType, Payment
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 
 pytestmark = pytest.mark.integration
@@ -329,7 +329,7 @@ async def test_integrity_error_without_postgres_details_is_preserved(
     payment_headers: dict[str, str],
 ) -> None:
     error = IntegrityError(None, None, ValueError("Unexpected constraint error"))
-    repository = Mock(spec=PaymentRepository)
+    repository = Mock(spec=SqlAlchemyPaymentRepository)
     repository.find_by_idempotency_key = AsyncMock(side_effect=error)
     repository_factory = Mock(return_value=repository)
     override_payment_service(
@@ -348,7 +348,7 @@ async def test_integrity_error_without_postgres_details_is_preserved(
     repository.save_with_outbox.assert_not_awaited()
 
 
-class MissingPaymentRepository(PaymentRepository):
+class MissingPaymentRepository(SqlAlchemyPaymentRepository):
     async def find_by_idempotency_key(self, idempotency_key: str) -> Payment | None:
         return None
 
@@ -367,7 +367,7 @@ def _synchronize_payment_creation(
     barrier = asyncio.Barrier(2)
     tracking = _ConcurrentTransactions()
 
-    class SynchronizedRepository(PaymentRepository):
+    class SynchronizedRepository(SqlAlchemyPaymentRepository):
         async def find_by_idempotency_key(self, key: str) -> Payment | None:
             existing = await super().find_by_idempotency_key(key)
             if existing is None:
@@ -418,17 +418,17 @@ async def _post_concurrently(
 def _miss_first_payment_lookup(
     database: Database,
     override_payment_service: Callable[[PaymentService], None],
-) -> list[PaymentRepository]:
-    repositories: list[PaymentRepository] = []
+) -> list[SqlAlchemyPaymentRepository]:
+    repositories: list[SqlAlchemyPaymentRepository] = []
 
-    def repository_factory(session: AsyncSession) -> PaymentRepository:
-        repository: PaymentRepository
+    def repository_factory(session: AsyncSession) -> SqlAlchemyPaymentRepository:
+        repository: SqlAlchemyPaymentRepository
         if not repositories:
             repository = MissingPaymentRepository(session)
         else:
             assert not repositories[0].session.in_transaction()
             assert session is not repositories[0].session
-            repository = PaymentRepository(session)
+            repository = SqlAlchemyPaymentRepository(session)
         repositories.append(repository)
         return repository
 

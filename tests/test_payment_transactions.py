@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapper, Session
 
 from payment_processor.application.payment_events import build_payment_created_payload
 from payment_processor.db.models import Outbox, Payment
-from payment_processor.db.repositories.payments import PaymentRepository
+from payment_processor.db.repositories.payments import SqlAlchemyPaymentRepository
 from payment_processor.db.session import Database
 from payment_processor.domain.payment import Payment as DomainPayment
 from payment_processor.domain.payment import PaymentCurrency
@@ -119,7 +119,7 @@ async def test_commit_failure_rolls_back_payment_and_outbox(
 
     with pytest.raises(RuntimeError, match="commit failed") as caught:
         async with outbox_database.session_scope() as session:
-            repository = PaymentRepository(session)
+            repository = SqlAlchemyPaymentRepository(session)
             await repository.save_with_outbox(
                 payment, event_payload=build_payment_created_payload(payment)
             )

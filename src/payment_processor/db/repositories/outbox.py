@@ -142,6 +142,3 @@ class SqlAlchemyOutboxRepository(OutboxStore):
         if identifiers and not dry_run:
             await self.session.execute(delete(Outbox).where(Outbox.id.in_(identifiers)))
         return len(identifiers)
-
-
-OutboxRepository = SqlAlchemyOutboxRepository
