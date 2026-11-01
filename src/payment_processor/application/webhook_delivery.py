@@ -12,6 +12,7 @@ from payment_processor.application.payment_leases import (
 from payment_processor.application.ports import WebhookDeliveryStore, WebhookSender
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.domain.payment import InvalidPaymentTransition
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,10 @@ class DeliverPaymentWebhookUseCase:
             ) as (payment, token):
                 outcome = "already_delivered"
                 if token is not None:
+                    if not payment.is_completed:
+                        raise InvalidPaymentTransition(
+                            "Webhook delivery requires a completed payment"
+                        )
                     snapshot = PaymentDetailsResult.from_payment(payment)
                     async with asyncio.timeout(EXTERNAL_CALL_TIMEOUT):
                         await sender.send(snapshot)

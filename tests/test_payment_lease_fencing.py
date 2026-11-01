@@ -24,6 +24,7 @@ async def test_stale_external_success_cannot_overwrite_new_owner_or_release_its_
         amount=Decimal("10.50"),
         currency=PaymentCurrency.RUB,
         description="Lease fencing",
+        created_at=datetime.now(UTC) - timedelta(seconds=1),
         payment_metadata={},
         idempotency_key=str(uuid4()),
         webhook_url="https://example.com/webhook",

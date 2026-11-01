@@ -21,6 +21,7 @@ def to_domain(model: PaymentModel) -> Payment:
 
 
 def update_model(model: PaymentModel, payment: Payment) -> None:
+    payment.validate()
     if model.id != payment.id:
         raise ValueError("Payment identity does not match the persistence model")
     model.amount = payment.amount
