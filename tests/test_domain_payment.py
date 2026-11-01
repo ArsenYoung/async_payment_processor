@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -14,6 +14,7 @@ from payment_processor.domain.payment import (
 
 
 def make_payment(**state: Any) -> Payment:
+    state.setdefault("created_at", datetime.now(UTC) - timedelta(seconds=1))
     return Payment(
         id=uuid4(),
         amount=Decimal("10.50"),
@@ -70,7 +71,10 @@ def test_webhook_delivery_is_idempotent() -> None:
 def test_only_pending_to_terminal_transitions_are_allowed(
     source: PaymentStatus, target: PaymentStatus
 ) -> None:
-    payment = make_payment(status=source)
+    payment = make_payment(
+        status=source,
+        processed_at=None if source == PaymentStatus.PENDING else datetime.now(UTC),
+    )
     if source == PaymentStatus.PENDING and target != PaymentStatus.PENDING:
         payment.process(target)
         assert payment.status == target
@@ -79,7 +83,7 @@ def test_only_pending_to_terminal_transitions_are_allowed(
         with pytest.raises(InvalidPaymentTransition):
             payment.process(target)
         assert payment.status == source
-        assert payment.processed_at is None
+        assert (payment.processed_at is None) == (source == PaymentStatus.PENDING)
 
 
 def test_unknown_status_is_rejected() -> None:
@@ -89,7 +93,30 @@ def test_unknown_status_is_rejected() -> None:
 
 @pytest.mark.parametrize("status", [PaymentStatus.SUCCEEDED, PaymentStatus.FAILED])
 def test_terminal_status_without_processing_time_cannot_deliver(status: PaymentStatus):
-    payment = make_payment(status=status)
-    assert not payment.is_completed
     with pytest.raises(InvalidPaymentTransition):
-        payment.mark_webhook_delivered()
+        make_payment(status=status)
+
+
+@pytest.mark.parametrize("amount", ["0", "-1", "NaN", "Infinity", "-Infinity"])
+def test_domain_rejects_invalid_amounts(amount):
+    payment = make_payment()
+    payment.amount = Decimal(amount)
+    with pytest.raises(ValueError):
+        Payment(**vars(payment))
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"processed_at": datetime.now(UTC)},
+        {"webhook_delivered_at": datetime.now(UTC)},
+        {"created_at": datetime(2020, 1, 1)},
+        {
+            "status": PaymentStatus.SUCCEEDED,
+            "processed_at": datetime(2000, 1, 1, tzinfo=UTC),
+        },
+    ],
+)
+def test_domain_rejects_inconsistent_timestamps(state):
+    with pytest.raises(ValueError):
+        make_payment(**state)

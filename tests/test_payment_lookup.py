@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -79,6 +79,7 @@ async def _save_payment(
         idempotency_key=idempotency_key,
         webhook_url="https://example.com/webhook",
         status=status,
+        created_at=datetime.now(UTC) - timedelta(seconds=1),
         processed_at=(None if status == PaymentStatus.PENDING else datetime.now(UTC)),
     )
     async with database.session_scope() as session:

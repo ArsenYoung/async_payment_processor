@@ -30,3 +30,9 @@ def test_webhook_url_accepts_http_url() -> None:
 def test_webhook_url_rejects_non_http_url(url: str) -> None:
     with pytest.raises(ValueError):
         WebhookUrl(url)
+
+
+@pytest.mark.parametrize("currency", ["", "GBP", "rub"])
+def test_money_rejects_unsupported_currency(currency):
+    with pytest.raises(ValueError):
+        Money(Decimal("1"), currency)

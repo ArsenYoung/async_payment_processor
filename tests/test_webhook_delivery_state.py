@@ -32,6 +32,7 @@ async def completed_payment(outbox_database: Database) -> Payment:
         idempotency_key=f"test-delivery-{uuid4()}",
         webhook_url="https://example.com/webhook",
         status=PaymentStatus.SUCCEEDED,
+        created_at=datetime(2026, 10, 28, 10, 0, 0, tzinfo=UTC),
         processed_at=datetime(2026, 10, 28, 10, 0, 3, tzinfo=UTC),
     )
     async with outbox_database.session_scope() as session:
@@ -142,7 +143,12 @@ async def test_incomplete_payment_cannot_be_marked_delivered(
         payment.status = status
         payment.processed_at = processed_at
 
-    with pytest.raises(ValueError, match="requires a completed payment"):
+    expected = (
+        "requires a completed payment"
+        if status == PaymentStatus.PENDING and processed_at is None
+        else "status and processing time disagree"
+    )
+    with pytest.raises(ValueError, match=expected):
         async with outbox_database.session_scope() as session:
             repository = PaymentRepository(session)
             payment = await repository.find_by_id_for_update(completed_payment.id)

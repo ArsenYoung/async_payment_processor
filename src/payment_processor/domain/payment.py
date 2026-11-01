@@ -6,6 +6,13 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
+from payment_processor.domain.value_objects import (
+    validate_amount,
+    validate_currency,
+    validate_idempotency_key,
+    validate_webhook_url,
+)
+
 
 class PaymentCurrency(StrEnum):
     RUB = "RUB"
@@ -50,7 +57,33 @@ class Payment:
     def __post_init__(self) -> None:
         self.status = PaymentStatus(self.status)
         self.currency = PaymentCurrency(self.currency)
+        self.validate()
         self.payment_metadata = deepcopy(self.payment_metadata)
+
+    def validate(self) -> None:
+        validate_amount(self.amount)
+        validate_currency(self.currency.value)
+        validate_idempotency_key(self.idempotency_key)
+        validate_webhook_url(self.webhook_url)
+        if (self.status == PaymentStatus.PENDING) != (self.processed_at is None):
+            raise InvalidPaymentTransition(
+                "Payment status and processing time disagree"
+            )
+        if self.webhook_delivered_at is not None and not self.is_completed:
+            raise InvalidPaymentTransition(
+                "Webhook delivery requires a completed payment"
+            )
+        dates = [self.created_at, self.processed_at, self.webhook_delivered_at]
+        if any(value is not None and value.utcoffset() is None for value in dates):
+            raise ValueError("Payment timestamps must include a timezone")
+        if self.processed_at is not None and self.processed_at < self.created_at:
+            raise InvalidPaymentTransition("Processing cannot precede payment creation")
+        if (
+            self.webhook_delivered_at is not None
+            and self.processed_at is not None
+            and self.webhook_delivered_at < self.processed_at
+        ):
+            raise InvalidPaymentTransition("Delivery cannot precede processing")
 
     @property
     def is_completed(self) -> bool:
@@ -61,6 +94,7 @@ class Payment:
         return can_process(self.status)
 
     def process(self, status: PaymentStatus) -> None:
+        self.validate()
         if not self.can_process:
             raise InvalidPaymentTransition(
                 f"Payment in status {self.status} cannot be processed"
@@ -73,6 +107,7 @@ class Payment:
         self.processed_at = datetime.now(UTC)
 
     def mark_webhook_delivered(self) -> None:
+        self.validate()
         if not self.is_completed:
             raise InvalidPaymentTransition(
                 "Webhook delivery requires a completed payment"

@@ -6,7 +6,6 @@ from uuid import uuid4
 from payment_processor.application.errors import IdempotencyKeyViolationError
 from payment_processor.application.results import PaymentCreatedResult
 from payment_processor.domain.payment import Payment
-from payment_processor.domain.value_objects import IdempotencyKey, Money, WebhookUrl
 from payment_processor.services.contracts import CreatePaymentCommand
 from payment_processor.services.payment_events import build_payment_created_payload
 from payment_processor.services.payment_rules import matches_create_command
@@ -29,9 +28,6 @@ class CreatePaymentUseCase:
         self._store_scope_factory = store_scope_factory
 
     async def create(self, command: CreatePaymentCommand) -> PaymentCreatedResult:
-        Money(command.amount, str(command.currency))
-        IdempotencyKey(command.idempotency_key)
-        WebhookUrl(command.webhook_url)
         try:
             payment = await self._create(command)
         except IdempotencyKeyViolationError as error:
