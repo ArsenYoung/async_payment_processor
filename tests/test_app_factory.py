@@ -186,7 +186,7 @@ async def test_each_application_protects_added_routes(
     ],
 )
 @pytest.mark.parametrize("with_api_key", [False, True], ids=["anonymous", "authorized"])
-async def test_each_application_exposes_public_documentation(
+async def test_each_application_protects_documentation(
     applications: tuple[FastAPI, FastAPI],
     path: str,
     content_type: str,
@@ -199,8 +199,9 @@ async def test_each_application_exposes_public_documentation(
         ) as client:
             response = await client.get(path, headers=headers)
 
-        assert response.status_code == 200
-        assert response.headers["content-type"].startswith(content_type)
+        assert response.status_code == (200 if with_api_key else 401)
+        if with_api_key:
+            assert response.headers["content-type"].startswith(content_type)
 
 
 @pytest.mark.asyncio
@@ -221,7 +222,9 @@ async def test_each_application_documents_api_key_authorization(
         async with AsyncClient(
             transport=ASGITransport(app=application), base_url="http://test"
         ) as client:
-            response = await client.get("/openapi.json")
+            response = await client.get(
+                "/openapi.json", headers={"X-API-Key": settings.api_key}
+            )
 
         assert response.status_code == 200
         schema = response.json()
@@ -260,3 +263,35 @@ async def test_each_application_uses_validation_error_handler(
         assert len(errors) == 1
         assert errors[0]["loc"] == ["body", "amount"]
         assert set(errors[0]) == {"type", "loc", "msg"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path", ["/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"]
+)
+async def test_documentation_rejects_incorrect_key(applications, path):
+    async with AsyncClient(
+        transport=ASGITransport(app=applications[0]), base_url="http://test"
+    ) as client:
+        assert (
+            await client.get(path, headers={"X-API-Key": "incorrect"})
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_swagger_bootstrap_and_schema_use_header_authentication(applications):
+    async with AsyncClient(
+        transport=ASGITransport(app=applications[0]), base_url="http://test"
+    ) as client:
+        login = await client.get("/docs")
+        assert login.status_code == 401
+        assert 'type="password"' in login.text
+        assert "headers: {'X-API-Key': key}" in login.text
+        page = await client.get("/docs", headers={"X-API-Key": settings.api_key})
+        assert "requestInterceptor" in page.text
+        assert "request.headers['X-API-Key']" in page.text
+        assert settings.api_key not in page.text
+        schema = await client.get(
+            "/openapi.json", headers={"X-API-Key": settings.api_key}
+        )
+        assert schema.json()["paths"]["/health"]["get"]["security"] == [{"APIKey": []}]
