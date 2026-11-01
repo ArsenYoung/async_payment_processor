@@ -8,6 +8,8 @@ x-application: &application
     RABBITMQ_URL: amqp://e2e:e2e@rabbitmq:5672/
     API_KEY: e2e-api-key
     LOG_LEVEL: INFO
+    APP_ENV: test
+    WEBHOOK_ALLOWED_PRIVATE_HOSTS: '["webhook-receiver"]'
 
 services:
   postgres:

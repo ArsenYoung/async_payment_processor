@@ -411,3 +411,87 @@ async def test_different_payments_have_distinct_delivery_ids(
         await client.send(PaymentDetailsResult.from_payment(completed_payment))
     assert len(set(delivery_ids)) == 2
     assert delivery_ids[1] == str(completed_payment.id)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address",
+    [
+        "127.0.0.1",
+        "10.1.2.3",
+        "169.254.169.254",
+        "::1",
+        "fe80::1",
+        "fc00::1",
+        "fec0::1",
+        "2002:7f00:1::",
+        "64:ff9b::7f00:1",
+        "::ffff:127.0.0.1",
+        "0.0.0.0",
+        "224.0.0.1",
+    ],
+)
+async def test_webhook_network_backend_blocks_non_public_dns_addresses(
+    monkeypatch, address
+):
+    import socket
+
+    from payment_processor.adapters.webhook_transport import (
+        RestrictedBackend,
+        WebhookDestinationError,
+    )
+
+    backend = RestrictedBackend()
+    connect = AsyncMock()
+    monkeypatch.setattr(backend._backend, "connect_tcp", connect)
+    monkeypatch.setattr(
+        asyncio.get_running_loop(),
+        "getaddrinfo",
+        AsyncMock(
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 80))]
+        ),
+    )
+    with pytest.raises(WebhookDestinationError):
+        await backend.connect_tcp("recipient.example", 80)
+    connect.assert_not_awaited()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_webhook_pins_checked_address_without_second_hostname_lookup(monkeypatch):
+    import socket
+
+    from payment_processor.adapters.webhook_transport import (
+        RestrictedBackend,
+        WebhookDestinationError,
+    )
+
+    backend = RestrictedBackend()
+    connect = AsyncMock()
+    monkeypatch.setattr(backend._backend, "connect_tcp", connect)
+    resolve = AsyncMock(
+        side_effect=[
+            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))],
+        ]
+    )
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", resolve)
+    await backend.connect_tcp("recipient.example", 443)
+    assert connect.await_args.args == ("93.184.216.34", 443)
+    assert resolve.await_count == 1
+    with pytest.raises(WebhookDestinationError):
+        await backend.connect_tcp("recipient.example", 443)
+    assert connect.await_count == 1
+
+
+@pytest.mark.unit
+def test_production_configuration_rejects_private_host_exceptions():
+    with pytest.raises(ValueError, match="Private webhook hosts"):
+        Settings(
+            database_url="unused",
+            rabbitmq_url="unused",
+            api_key="unused",
+            app_env="production",
+            webhook_allowed_private_hosts=["webhook-receiver"],
+        )
