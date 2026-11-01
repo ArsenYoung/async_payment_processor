@@ -193,3 +193,49 @@ def _assert_signal_cleanup(loop_signals: SimpleNamespace) -> None:
         call(signal.SIGINT, signal.SIG_DFL),
         call(signal.SIGTERM, signal.SIG_DFL),
     ]
+
+
+@pytest.mark.asyncio
+async def test_readiness_tracks_dependencies_progress_timeout_and_idle(tmp_path):
+    from time import monotonic
+
+    from payment_processor.core.health import WorkerHealth, healthy
+
+    path = tmp_path / "health.json"
+    dependency = AsyncMock(return_value=True)
+    progress = monotonic()
+    health = WorkerHealth(dependency, path=path, progress=lambda: progress)
+    assert not healthy(path)
+    assert await health.sample()
+    assert healthy(path)
+    dependency.return_value = False
+    assert not await health.sample()
+    assert not healthy(path)
+    dependency.return_value = True
+    assert await health.sample()
+    progress -= 60
+    assert not await health.sample()
+    idle = WorkerHealth(dependency, path=path)
+    assert await idle.sample()
+    assert healthy(path)
+    assert not healthy(path, max_age=0)
+    dependency.side_effect = RuntimeError("secret")
+    assert not await idle.sample()
+    assert "secret" not in path.read_text()
+
+
+@pytest.mark.asyncio
+async def test_readiness_dependency_timeout_and_shutdown_remove_state(tmp_path):
+    from payment_processor.core.health import WorkerHealth
+
+    path = tmp_path / "health.json"
+
+    async def stalled():
+        await asyncio.Event().wait()
+
+    health = WorkerHealth(stalled, path=path, timeout=0.001)
+    assert not await health.sample()
+    async with health.monitor():
+        await health.sample()
+        assert path.exists()
+    assert not path.exists()

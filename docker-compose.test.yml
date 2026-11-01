@@ -49,7 +49,6 @@ services:
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
-    restart: unless-stopped
         condition: service_healthy
 
   api:
@@ -65,17 +64,22 @@ services:
         - -c
         - >-
           import urllib.request;
-          request = urllib.request.Request('http://localhost:8000/health', headers={'X-API-Key': 'e2e-api-key'});
+          request = urllib.request.Request('http://localhost:8000/ready', headers={'X-API-Key': 'e2e-api-key'});
           urllib.request.urlopen(request, timeout=3).close()
       interval: 1s
       timeout: 5s
       retries: 60
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     <<: *application
     command: ["python", "-m", "payment_processor.outbox_to_rabbitmq_worker.main"]
@@ -84,13 +88,17 @@ services:
       OUTBOX_POLL_INTERVAL: "0.1"
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
-    restart: unless-stopped
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     <<: *application
     command: ["python", "/app/e2e/consumer.py"]
@@ -101,25 +109,27 @@ services:
       - ./tests/e2e:/app/e2e:ro
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
-    restart: unless-stopped
         condition: service_healthy
       webhook-receiver:
         condition: service_healthy
 
   rabbitmq-to-payment-worker-smoke:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     <<: *application
     profiles: [smoke]
     command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
-    restart: unless-stopped
         condition: service_healthy
 
   webhook-receiver:

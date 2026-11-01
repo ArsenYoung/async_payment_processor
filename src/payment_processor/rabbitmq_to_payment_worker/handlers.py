@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from contextlib import ExitStack
 from time import perf_counter
 from uuid import UUID
@@ -30,16 +31,18 @@ def register_payment_subscriber(
     webhook_client: WebhookSender,
     *,
     retry_policy: RetryPolicy,
-) -> None:
+) -> Callable[[], bool]:
     async def decode_body(message: IncomingPaymentMessage) -> bytes:
         return message.body
 
-    @broker.subscriber(
+    subscription = broker.subscriber(
         topology.PAYMENTS_NEW_QUEUE,
         exchange=topology.PAYMENTS_EXCHANGE,
         ack_policy=AckPolicy.NACK_ON_ERROR,
         decoder=decode_body,
     )
+
+    @subscription
     async def handle_payment(body: bytes, message: RabbitMessage) -> None:
         attempt = 1
         reason = "invalid_message"
@@ -116,3 +119,5 @@ def register_payment_subscriber(
                         duration_ms=(perf_counter() - started) * 1000,
                     ),
                 )
+
+    return lambda: subscription.running

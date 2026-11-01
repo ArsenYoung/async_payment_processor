@@ -54,17 +54,22 @@ services:
         - -c
         - >-
           import os, urllib.request;
-          request = urllib.request.Request('http://localhost:8000/health', headers={'X-API-Key': os.environ['API_KEY']});
+          request = urllib.request.Request('http://localhost:8000/ready', headers={'X-API-Key': os.environ['API_KEY']});
           urllib.request.urlopen(request, timeout=3).close()
       interval: 5s
       timeout: 5s
       retries: 5
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     image: payment-processing-worker:local
     build:
@@ -81,13 +86,17 @@ services:
       OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
-    restart: unless-stopped
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    healthcheck:
+      test: ["CMD", "python", "-m", "payment_processor.core.health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     image: payment-processing-worker:local
     build:
@@ -109,10 +118,8 @@ services:
       CONSUMER_PREFETCH_COUNT: ${CONSUMER_PREFETCH_COUNT:-5}
     depends_on:
       migrate:
-    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
-    restart: unless-stopped
         condition: service_healthy
 
   migrate:
@@ -128,7 +135,6 @@ services:
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
     depends_on:
       postgres:
-    restart: unless-stopped
         condition: service_healthy
 
 volumes:

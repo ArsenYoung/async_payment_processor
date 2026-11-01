@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from time import perf_counter
+from time import monotonic, perf_counter
 from uuid import UUID, uuid4
 
 from payment_processor.application.errors import PersistenceUnavailableError
@@ -33,11 +33,13 @@ class OutboxService:
         self._store_scope_factory = store_scope_factory
         self._publisher = publisher
         self._queue_name = queue_name
+        self.last_progress = monotonic()
 
     async def run(
         self, *, batch_size: int, poll_interval: float, publish_timeout: float
     ) -> None:
         while True:
+            self.last_progress = monotonic()
             try:
                 result = await self.publish_batch(batch_size, timeout=publish_timeout)
             except (PersistenceUnavailableError, OSError) as error:
@@ -59,6 +61,7 @@ class OutboxService:
                     )
                 elif result.published:
                     logger.info("Outbox batch: %d published", result.published)
+            self.last_progress = monotonic()
             await asyncio.sleep(poll_interval)
 
     async def publish_batch(
@@ -74,6 +77,7 @@ class OutboxService:
         context: dict[str, object] = {"operation": "outbox_poll"}
         try:
             for _ in range(limit):
+                self.last_progress = monotonic()
                 token = uuid4()
                 finalized = False
                 record: OutboxRecord | None = None

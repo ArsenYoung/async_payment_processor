@@ -4,6 +4,7 @@ import logging
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
+from payment_processor.core.health import WorkerHealth
 from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
 from payment_processor.db.session import Database
@@ -38,7 +39,7 @@ async def _consume() -> None:
                     max_attempts=settings.retry_max_attempts,
                     backoff_multiplier=settings.retry_backoff_multiplier,
                 )
-                register_payment_subscriber(
+                subscription_ready = register_payment_subscriber(
                     broker,
                     payment_service,
                     webhook_client,
@@ -52,7 +53,13 @@ async def _consume() -> None:
                 logging.getLogger(__name__).info(
                     "Payment consumer ready", extra={"outcome": "ready"}
                 )
-                await asyncio.Event().wait()
+
+                async def readiness() -> bool:
+                    await database.check_connection()
+                    return await broker.ping(timeout=1) and subscription_ready()
+
+                async with WorkerHealth(readiness).monitor():
+                    await asyncio.Event().wait()
             finally:
                 await broker.stop()
     finally:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -9,7 +10,7 @@ from fastapi.openapi.docs import (
     get_swagger_ui_html,
     get_swagger_ui_oauth2_redirect_html,
 )
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.api.dependencies import require_api_key
@@ -20,6 +21,7 @@ from payment_processor.api.middleware import (
 )
 from payment_processor.api.routes.payments import router as payments_router
 from payment_processor.core.config import settings
+from payment_processor.core.health import HEALTH_TIMEOUT
 from payment_processor.core.logging import configure_logging
 from payment_processor.db.session import Database
 
@@ -72,7 +74,17 @@ def create_app(database: Database | None = None) -> FastAPI:
     application.add_middleware(RequestLoggingMiddleware)
     application.include_router(payments_router, prefix="/api/v1")
     application.add_api_route("/health", healthcheck, methods=["GET"], tags=["health"])
+    application.add_api_route("/ready", readiness, methods=["GET"], tags=["health"])
     return application
+
+
+async def readiness(request: Request) -> Response:
+    try:
+        async with asyncio.timeout(HEALTH_TIMEOUT):
+            await request.app.state.database.check_connection()
+    except Exception:
+        return JSONResponse({"status": "not_ready"}, status_code=503)
+    return JSONResponse({"status": "ready"})
 
 
 async def healthcheck() -> dict[str, str]:

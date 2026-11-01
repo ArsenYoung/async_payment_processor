@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from payment_processor.core.config import settings
+from payment_processor.core.health import WorkerHealth
 from payment_processor.core.logging import configure_library_logging, configure_logging
 from payment_processor.core.worker import run_worker
 from payment_processor.db.repositories.factories import outbox_repository_scope
@@ -34,11 +35,25 @@ async def _publish() -> None:
             logging.getLogger(__name__).info(
                 "Outbox publisher ready", extra={"outcome": "ready"}
             )
-            await service.run(
-                batch_size=settings.outbox_batch_size,
-                poll_interval=settings.outbox_poll_interval,
-                publish_timeout=settings.outbox_publish_timeout,
+
+            async def readiness() -> bool:
+                await database.check_connection()
+                return await broker.ping(timeout=1)
+
+            health = WorkerHealth(
+                readiness,
+                progress=lambda: service.last_progress,
+                progress_timeout=max(
+                    settings.outbox_poll_interval * 2 + 5,
+                    settings.outbox_publish_timeout + 15,
+                ),
             )
+            async with health.monitor():
+                await service.run(
+                    batch_size=settings.outbox_batch_size,
+                    poll_interval=settings.outbox_poll_interval,
+                    publish_timeout=settings.outbox_publish_timeout,
+                )
         finally:
             await broker.stop()
     finally:

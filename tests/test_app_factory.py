@@ -295,3 +295,27 @@ async def test_swagger_bootstrap_and_schema_use_header_authentication(applicatio
             "/openapi.json", headers={"X-API-Key": settings.api_key}
         )
         assert schema.json()["paths"]["/health"]["get"]["security"] == [{"APIKey": []}]
+
+
+@pytest.mark.asyncio
+async def test_readiness_checks_database_and_recovers():
+    database = Mock(spec=Database)
+    application = create_app(database)
+    async with AsyncClient(
+        transport=ASGITransport(app=application), base_url="http://test"
+    ) as client:
+        assert (await client.get("/ready")).status_code == 401
+        for failure, expected in [
+            (None, 200),
+            (RuntimeError("secret database URL"), 503),
+            (None, 200),
+        ]:
+            database.check_connection.side_effect = failure
+            response = await client.get(
+                "/ready", headers={"X-API-Key": settings.api_key}
+            )
+            assert response.status_code == expected
+            assert "secret" not in response.text
+        assert (
+            await client.get("/health", headers={"X-API-Key": settings.api_key})
+        ).status_code == 200
