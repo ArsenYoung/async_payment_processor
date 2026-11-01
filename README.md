@@ -831,3 +831,5 @@ docker compose logs -f rabbitmq-to-payment-worker
 CI запускает Docker smoke/e2e отдельным job с `RUN_DOCKER_SMOKE=1 RUN_E2E=1`. Каждый стек получает случайное имя проекта и свободные порты. Фикстуры собирают логи и удаляют только собственные ресурсы; журнал job загружается как artifact даже при ошибке.
 
 Обработка, публикация Outbox и доставка webhook используют порядок claim → commit → внешний вызов без открытой транзакции → проверка токена и срока lease → commit результата. Три управляемые попытки consumer не ограничивают общее число broker redelivery. При потере подтверждения внешний вызов может повториться: gateway обязан дедуплицировать по UUID платежа, получатель — по `X-Webhook-Delivery-Id`.
+
+Прикладной фасад `PaymentService` принимает только `CreatePaymentCommand`, `GetPaymentQuery`, `ProcessPaymentCommand` и `DeliverWebhookCommand`. Преобразование HTTP-запроса выполняется маршрутом API.

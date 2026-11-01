@@ -17,6 +17,7 @@ from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.dependencies import get_payment_service
 from payment_processor.api.main import create_app
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import settings
 from payment_processor.db.models import Outbox, Payment
@@ -109,7 +110,15 @@ async def retry_event(
     payment = await create_payment_service(
         outbox_database.session_scope
     ).create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"retry-{uuid4()}"
+        CreatePaymentCommand(
+            **(PaymentCreateRequest.model_validate(payment_payload)).model_dump(
+                exclude={"webhook_url"}
+            ),
+            webhook_url=str(
+                (PaymentCreateRequest.model_validate(payment_payload)).webhook_url
+            ),
+            idempotency_key=f"retry-{uuid4()}",
+        )
     )
     async with outbox_database.session_scope() as session:
         outbox = await session.scalar(

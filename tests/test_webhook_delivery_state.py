@@ -14,6 +14,7 @@ from payment_processor.adapters.webhooks import (
     WebhookClient,
     WebhookRequestTimeoutError,
 )
+from payment_processor.application.commands import DeliverWebhookCommand
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
@@ -283,7 +284,9 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
     ) as webhook:
         tasks = [
             asyncio.create_task(
-                first_service.deliver_webhook(completed_payment.id, webhook)
+                first_service.deliver_webhook(
+                    DeliverWebhookCommand(completed_payment.id), webhook
+                )
             )
         ]
         try:
@@ -291,7 +294,9 @@ async def test_concurrent_delivery_waits_and_skips_committed_webhook(
                 await webhook_entered.wait()
                 tasks.append(
                     asyncio.create_task(
-                        second_service.deliver_webhook(completed_payment.id, webhook)
+                        second_service.deliver_webhook(
+                            DeliverWebhookCommand(completed_payment.id), webhook
+                        )
                     )
                 )
                 await waiter_started.wait()
@@ -353,7 +358,7 @@ async def test_delivery_failure_releases_lease_and_repeats_same_snapshot(
 
     with pytest.raises(type(error)):
         await create_payment_service(scope).deliver_webhook(
-            completed_payment.id, sender
+            DeliverWebhookCommand(completed_payment.id), sender
         )
     snapshot = sender.send.await_args.args[0]
     async with outbox_database.session_scope() as session:
@@ -363,7 +368,7 @@ async def test_delivery_failure_releases_lease_and_repeats_same_snapshot(
         assert saved.webhook_until is None
     sender.send.side_effect = None
     await create_payment_service(outbox_database.session_scope).deliver_webhook(
-        completed_payment.id, sender
+        DeliverWebhookCommand(completed_payment.id), sender
     )
     assert sender.send.await_count == 2
     assert sender.send.await_args.args[0] == snapshot
@@ -393,7 +398,7 @@ async def test_http_uses_snapshot_without_connection_or_row_lock(
     sender = AsyncMock()
     sender.send.side_effect = send
     await create_payment_service(outbox_database.session_scope).deliver_webhook(
-        completed_payment.id, sender
+        DeliverWebhookCommand(completed_payment.id), sender
     )
     assert snapshot is not None
     async with outbox_database.session_scope() as session:
@@ -422,7 +427,7 @@ async def test_webhook_lease_expiry_allows_restart_and_fences_old_owner(
         saved.webhook_until = datetime.now(UTC) - timedelta(seconds=1)
     sender = AsyncMock()
     await create_payment_service(outbox_database.session_scope).deliver_webhook(
-        completed_payment.id, sender
+        DeliverWebhookCommand(completed_payment.id), sender
     )
     sender.send.assert_awaited_once()
     with pytest.raises(LeaseLostError):

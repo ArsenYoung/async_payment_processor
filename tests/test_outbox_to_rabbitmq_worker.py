@@ -15,6 +15,7 @@ from sqlalchemy.exc import (
 )
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.application.errors import PersistenceUnavailableError
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core import worker as worker_module
@@ -446,8 +447,19 @@ async def test_running_publisher_publishes_new_payment_automatically(
                         await started.wait()
                         service = create_payment_service(outbox_database.session_scope)
                         payment = await service.create_payment(
-                            PaymentCreateRequest.model_validate(payment_payload),
-                            f"test-lifecycle-{uuid4()}",
+                            CreatePaymentCommand(
+                                **(
+                                    PaymentCreateRequest.model_validate(payment_payload)
+                                ).model_dump(exclude={"webhook_url"}),
+                                webhook_url=str(
+                                    (
+                                        PaymentCreateRequest.model_validate(
+                                            payment_payload
+                                        )
+                                    ).webhook_url
+                                ),
+                                idempotency_key=f"test-lifecycle-{uuid4()}",
+                            ),
                         )
                         await committed.wait()
                         message = await declared_queue.get(timeout=2)

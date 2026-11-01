@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
+from payment_processor.application.commands import ProcessPaymentCommand
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
 from payment_processor.db.repositories.payments import PaymentRepository
@@ -46,7 +47,7 @@ async def test_processing_commits_gateway_result_before_returning(
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     started_at = datetime.now(UTC)
 
-    payment = await service.process_payment(pending_payment.id)
+    payment = await service.process_payment(ProcessPaymentCommand(pending_payment.id))
 
     gateway.process.assert_awaited_once_with(idempotency_key=pending_payment.id)
     assert payment.payment_id == pending_payment.id
@@ -77,13 +78,13 @@ async def test_repeated_processing_preserves_completed_result(
     gateway.process.return_value = status
     first = await create_payment_service(
         outbox_database.session_scope, gateway=gateway
-    ).process_payment(pending_payment.id)
+    ).process_payment(ProcessPaymentCommand(pending_payment.id))
     repeated_gateway = AsyncMock(spec=PaymentGatewaySimulator)
     service = create_payment_service(
         outbox_database.session_scope, gateway=repeated_gateway
     )
 
-    repeated = await service.process_payment(pending_payment.id)
+    repeated = await service.process_payment(ProcessPaymentCommand(pending_payment.id))
 
     gateway.process.assert_awaited_once_with(idempotency_key=pending_payment.id)
     repeated_gateway.process.assert_not_awaited()
@@ -100,7 +101,7 @@ async def test_unknown_payment_raises_without_calling_gateway(
     payment_id = uuid4()
 
     with pytest.raises(LookupError, match=str(payment_id)):
-        await service.process_payment(payment_id)
+        await service.process_payment(ProcessPaymentCommand(payment_id))
 
     gateway.process.assert_not_awaited()
     async with outbox_database.session_scope() as session:
@@ -139,12 +140,20 @@ async def test_concurrent_processing_waits_and_reuses_committed_result(
     second_service = create_payment_service(
         outbox_database.session_scope, WaitingRepository, gateway=second_gateway
     )
-    tasks = [asyncio.create_task(first_service.process_payment(pending_payment.id))]
+    tasks = [
+        asyncio.create_task(
+            first_service.process_payment(ProcessPaymentCommand(pending_payment.id))
+        )
+    ]
     try:
         async with asyncio.timeout(10):
             await gateway_entered.wait()
             tasks.append(
-                asyncio.create_task(second_service.process_payment(pending_payment.id))
+                asyncio.create_task(
+                    second_service.process_payment(
+                        ProcessPaymentCommand(pending_payment.id)
+                    )
+                )
             )
             await waiter_started.wait()
             assert waiter_pid is not None
@@ -208,7 +217,7 @@ async def test_processing_failure_rolls_back_and_allows_retry(
 
     service = create_payment_service(session_scope, gateway=gateway)
     with pytest.raises(type(error)) as caught:
-        await service.process_payment(pending_payment.id)
+        await service.process_payment(ProcessPaymentCommand(pending_payment.id))
     assert caught.value is error
 
     async with outbox_database.session_scope() as session:
@@ -220,7 +229,7 @@ async def test_processing_failure_rolls_back_and_allows_retry(
     gateway.process.side_effect = None
     result = await create_payment_service(
         outbox_database.session_scope, gateway=gateway
-    ).process_payment(pending_payment.id)
+    ).process_payment(ProcessPaymentCommand(pending_payment.id))
     assert result.status == PaymentStatus.SUCCEEDED
     assert result.processed_at is not None
     assert gateway.process.await_count == 2
@@ -304,7 +313,8 @@ async def test_parallel_gateway_calls_release_a_single_connection_pool(
     gateway.process.side_effect = process
     service = create_payment_service(scope, gateway=gateway)
     tasks = [
-        asyncio.create_task(service.process_payment(identifier)) for identifier in ids
+        asyncio.create_task(service.process_payment(ProcessPaymentCommand(identifier)))
+        for identifier in ids
     ]
     try:
         async with asyncio.timeout(10):

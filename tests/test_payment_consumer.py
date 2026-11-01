@@ -19,6 +19,7 @@ from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.schemas.payment import PaymentCreateRequest
 from payment_processor.application.commands import (
+    CreatePaymentCommand,
     DeliverWebhookCommand,
     ProcessPaymentCommand,
 )
@@ -61,7 +62,15 @@ async def saved_event(
     payment = await create_payment_service(
         outbox_database.session_scope
     ).create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"consumer-{uuid4()}"
+        CreatePaymentCommand(
+            **(PaymentCreateRequest.model_validate(payment_payload)).model_dump(
+                exclude={"webhook_url"}
+            ),
+            webhook_url=str(
+                (PaymentCreateRequest.model_validate(payment_payload)).webhook_url
+            ),
+            idempotency_key=f"consumer-{uuid4()}",
+        )
     )
     async with outbox_database.session_scope() as session:
         outbox = await session.scalar(
@@ -530,7 +539,7 @@ async def test_delivery_of_unknown_payment_raises_before_sending(
 
     with pytest.raises(LookupError, match=str(payment_id)):
         await create_payment_service(outbox_database.session_scope).deliver_webhook(
-            payment_id, webhook
+            DeliverWebhookCommand(payment_id), webhook
         )
 
     webhook.send.assert_not_awaited()
@@ -546,7 +555,7 @@ async def test_pending_payment_cannot_be_delivered(
     ) as webhook:
         with pytest.raises(InvalidPaymentTransition, match="completed payment"):
             await create_payment_service(outbox_database.session_scope).deliver_webhook(
-                saved_event.payload.payment_id, webhook
+                DeliverWebhookCommand(saved_event.payload.payment_id), webhook
             )
 
     handle.assert_not_awaited()

@@ -13,6 +13,7 @@ from payment_processor.adapters.webhooks import (
     WebhookClient,
     WebhookRequestTimeoutError,
 )
+from payment_processor.application.commands import GetPaymentQuery
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.core.config import Settings
@@ -102,7 +103,7 @@ async def test_webhook_sends_saved_payment_result(
     async with outbox_database.session_scope() as session:
         session.add(completed_payment)
     payment = await create_payment_service(outbox_database.session_scope).get_payment(
-        completed_payment.id
+        GetPaymentQuery(completed_payment.id)
     )
     assert payment is not None
     requests: list[httpx.Request] = []

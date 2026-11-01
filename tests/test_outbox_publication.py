@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import CreatePaymentCommand
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.db.models import Outbox
 from payment_processor.db.repositories.outbox import OutboxRepository
@@ -40,7 +41,13 @@ async def outbox_events(
     service = create_payment_service(outbox_database.session_scope)
     request = PaymentCreateRequest.model_validate(payment_payload)
     for _ in range(3):
-        await service.create_payment(request, f"test-publication-{uuid4()}")
+        await service.create_payment(
+            CreatePaymentCommand(
+                **(request).model_dump(exclude={"webhook_url"}),
+                webhook_url=str((request).webhook_url),
+                idempotency_key=f"test-publication-{uuid4()}",
+            )
+        )
     return await _read_events(outbox_database)
 
 

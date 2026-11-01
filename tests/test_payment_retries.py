@@ -14,6 +14,7 @@ from payment_processor.adapters.webhooks import (
     WebhookClient,
     WebhookRequestTimeoutError,
 )
+from payment_processor.application.commands import GetPaymentQuery
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, PaymentStatus
 from payment_processor.db.session import Database
@@ -43,13 +44,13 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     call_times: list[float] = []
-    initial = await service.get_payment(retry_event.payload.payment_id)
+    initial = await service.get_payment(GetPaymentQuery(retry_event.payload.payment_id))
     assert initial is not None
 
     async def handle(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         call_times.append(monotonic())
-        payment = await service.get_payment(initial.payment_id)
+        payment = await service.get_payment(GetPaymentQuery(initial.payment_id))
         assert payment is not None
         assert payment.status == status
         assert payment.processed_at is not None
@@ -74,7 +75,9 @@ async def test_automatic_webhook_retry_preserves_result_and_recovers(
             await topology.publish_payment_event(routing_broker, retry_event)
             async with asyncio.timeout(10):
                 while True:
-                    delivered = await service.get_payment(initial.payment_id)
+                    delivered = await service.get_payment(
+                        GetPaymentQuery(initial.payment_id)
+                    )
                     assert delivered is not None
                     if delivered.webhook_delivered_at is not None:
                         break

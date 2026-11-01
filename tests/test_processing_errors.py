@@ -19,6 +19,11 @@ from sqlalchemy.exc import TimeoutError as DatabaseTimeoutError
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
 from payment_processor.api.schemas.payment import PaymentCreateRequest
+from payment_processor.application.commands import (
+    CreatePaymentCommand,
+    DeliverWebhookCommand,
+    ProcessPaymentCommand,
+)
 from payment_processor.application.errors import PaymentNotFoundError
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentStatus
@@ -124,9 +129,9 @@ async def test_missing_payment_has_explicit_non_retryable_error(
 
     with pytest.raises(PaymentNotFoundError) as caught:
         if operation == "process_payment":
-            await service.process_payment(payment_id)
+            await service.process_payment(ProcessPaymentCommand(payment_id))
         else:
-            await service.deliver_webhook(payment_id, webhook)
+            await service.deliver_webhook(DeliverWebhookCommand(payment_id), webhook)
 
     assert isinstance(caught.value, LookupError)
     assert caught.value.payment_id == payment_id
@@ -143,9 +148,17 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
     gateway = PaymentGatewaySimulator(success_rate=0.0, sleep=AsyncMock())
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
+        CreatePaymentCommand(
+            **(PaymentCreateRequest.model_validate(payment_payload)).model_dump(
+                exclude={"webhook_url"}
+            ),
+            webhook_url=str(
+                (PaymentCreateRequest.model_validate(payment_payload)).webhook_url
+            ),
+            idempotency_key=f"errors-{uuid4()}",
+        )
     )
-    result = await service.process_payment(payment.payment_id)
+    result = await service.process_payment(ProcessPaymentCommand(payment.payment_id))
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -155,7 +168,9 @@ async def test_failed_gateway_outcome_is_saved_and_delivered(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        await service.deliver_webhook(payment.payment_id, webhook)
+        await service.deliver_webhook(
+            DeliverWebhookCommand(payment.payment_id), webhook
+        )
 
     assert result.status == PaymentStatus.FAILED
     assert len(requests) == 1
@@ -182,11 +197,19 @@ async def test_retryable_gateway_error_preserves_pending_payment(
     gateway.process.side_effect = error
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
+        CreatePaymentCommand(
+            **(PaymentCreateRequest.model_validate(payment_payload)).model_dump(
+                exclude={"webhook_url"}
+            ),
+            webhook_url=str(
+                (PaymentCreateRequest.model_validate(payment_payload)).webhook_url
+            ),
+            idempotency_key=f"errors-{uuid4()}",
+        )
     )
 
     with pytest.raises(type(error)) as caught:
-        await service.process_payment(payment.payment_id)
+        await service.process_payment(ProcessPaymentCommand(payment.payment_id))
 
     assert caught.value is error
     assert is_retryable_processing_error(caught.value)
@@ -212,9 +235,17 @@ async def test_retryable_webhook_error_preserves_gateway_result(
     gateway.process.return_value = status
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     payment = await service.create_payment(
-        PaymentCreateRequest.model_validate(payment_payload), f"errors-{uuid4()}"
+        CreatePaymentCommand(
+            **(PaymentCreateRequest.model_validate(payment_payload)).model_dump(
+                exclude={"webhook_url"}
+            ),
+            webhook_url=str(
+                (PaymentCreateRequest.model_validate(payment_payload)).webhook_url
+            ),
+            idempotency_key=f"errors-{uuid4()}",
+        )
     )
-    result = await service.process_payment(payment.payment_id)
+    result = await service.process_payment(ProcessPaymentCommand(payment.payment_id))
     requests: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -229,7 +260,9 @@ async def test_retryable_webhook_error_preserves_gateway_result(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
         with pytest.raises(httpx.HTTPError) as caught:
-            await service.deliver_webhook(payment.payment_id, webhook)
+            await service.deliver_webhook(
+                DeliverWebhookCommand(payment.payment_id), webhook
+            )
 
     assert is_retryable_processing_error(caught.value)
     assert len(requests) == 1

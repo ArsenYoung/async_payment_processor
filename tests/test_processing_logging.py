@@ -15,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.application.commands import (
+    DeliverWebhookCommand,
+    GetPaymentQuery,
+    ProcessPaymentCommand,
+)
 from payment_processor.bootstrap import create_outbox_service, create_payment_service
 from payment_processor.core import worker as worker_module
 from payment_processor.core.config import settings
@@ -158,7 +163,7 @@ async def test_real_processing_path_logs_saved_results_and_separate_attempts(
         204,
     ]
     gateway.process.assert_awaited_once()
-    payment = await service.get_payment(retry_event.payload.payment_id)
+    payment = await service.get_payment(GetPaymentQuery(retry_event.payload.payment_id))
     assert payment is not None
     assert payment.status == status
     assert payment.webhook_delivered_at is not None
@@ -301,7 +306,7 @@ async def test_rollback_never_logs_a_saved_success(
     if operation == "webhook":
         await create_payment_service(
             outbox_database.session_scope, gateway=gateway
-        ).process_payment(retry_event.payload.payment_id)
+        ).process_payment(ProcessPaymentCommand(retry_event.payload.payment_id))
     caplog.clear()
     async with WebhookClient(
         timeout=1, transport=httpx.MockTransport(lambda request: httpx.Response(204))
@@ -312,9 +317,13 @@ async def test_rollback_never_logs_a_saved_success(
                     failing_commit, RabbitEventPublisher(routing_broker)
                 ).publish_batch(10)
             elif operation == "payment":
-                await service.process_payment(retry_event.payload.payment_id)
+                await service.process_payment(
+                    ProcessPaymentCommand(retry_event.payload.payment_id)
+                )
             else:
-                await service.deliver_webhook(retry_event.payload.payment_id, webhook)
+                await service.deliver_webhook(
+                    DeliverWebhookCommand(retry_event.payload.payment_id), webhook
+                )
     captured = entries(caplog)
     assert not any(
         entry.get("outcome") in ("published", "processed", "delivered")

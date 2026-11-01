@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from payment_processor.adapters.payment_gateway import PaymentGatewaySimulator
 from payment_processor.adapters.webhooks import WebhookClient
+from payment_processor.application.commands import GetPaymentQuery
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, PaymentStatus
 from payment_processor.db.session import Database
@@ -49,7 +50,7 @@ async def test_webhook_exhaustion_preserves_result_and_dead_letter_diagnostics(
     service = create_payment_service(outbox_database.session_scope, gateway=gateway)
     requests: list[httpx.Request] = []
     call_times: list[float] = []
-    initial = await service.get_payment(retry_event.payload.payment_id)
+    initial = await service.get_payment(GetPaymentQuery(retry_event.payload.payment_id))
     assert initial is not None
 
     def fail(request: httpx.Request) -> httpx.Response:
@@ -132,7 +133,7 @@ async def test_webhook_exhaustion_preserves_result_and_dead_letter_diagnostics(
     assert call_times[1] - call_times[0] >= 0.09
     assert call_times[2] - call_times[1] >= 0.18
     assert all(request.content == requests[0].content for request in requests)
-    payment = await service.get_payment(initial.payment_id)
+    payment = await service.get_payment(GetPaymentQuery(initial.payment_id))
     assert payment is not None
     assert payment.status == status
     assert payment.created_at == initial.created_at
@@ -248,7 +249,7 @@ async def test_failed_transfer_recovers_original_without_repeating_gateway(
     )
     assert len(requests) == (4 if attempt == 1 else 2)
     assert all(request.content == requests[0].content for request in requests)
-    payment = await service.get_payment(retry_event.payload.payment_id)
+    payment = await service.get_payment(GetPaymentQuery(retry_event.payload.payment_id))
     assert payment is not None
     assert payment.status == status
     assert (

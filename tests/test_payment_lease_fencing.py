@@ -6,6 +6,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import update
 
+from payment_processor.application.commands import (
+    DeliverWebhookCommand,
+    ProcessPaymentCommand,
+)
 from payment_processor.application.errors import LeaseLostError
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Payment, PaymentCurrency, PaymentStatus
@@ -65,9 +69,9 @@ async def test_stale_external_success_cannot_overwrite_new_owner_or_release_its_
     service = create_payment_service(outbox_database.session_scope, gateway=dependency)
     with pytest.raises(LeaseLostError):
         if operation == "processing":
-            await service.process_payment(payment.id)
+            await service.process_payment(ProcessPaymentCommand(payment.id))
         else:
-            await service.deliver_webhook(payment.id, dependency)
+            await service.deliver_webhook(DeliverWebhookCommand(payment.id), dependency)
     async with outbox_database.session_scope() as session:
         saved = await session.get(Payment, payment.id)
         assert saved.status == PaymentStatus.FAILED
