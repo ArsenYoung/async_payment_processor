@@ -11,7 +11,6 @@ import pytest
 import pytest_asyncio
 from faststream.rabbit import RabbitBroker
 from faststream.rabbit import TestRabbitBroker as RabbitTestBroker
-from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +25,7 @@ from payment_processor.application.commands import (
 from payment_processor.bootstrap import create_payment_service
 from payment_processor.db.models import Outbox, Payment, PaymentStatus
 from payment_processor.db.session import Database
+from payment_processor.domain.payment import InvalidPaymentTransition
 from payment_processor.messaging import topology
 from payment_processor.messaging.broker import create_broker
 from payment_processor.messaging.retry import RetryPolicy
@@ -544,7 +544,7 @@ async def test_pending_payment_cannot_be_delivered(
     async with WebhookClient(
         timeout=1.0, transport=httpx.MockTransport(handle)
     ) as webhook:
-        with pytest.raises(ValidationError):
+        with pytest.raises(InvalidPaymentTransition, match="completed payment"):
             await create_payment_service(outbox_database.session_scope).deliver_webhook(
                 saved_event.payload.payment_id, webhook
             )

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from payment_processor.application.results import PaymentDetailsResult
 from payment_processor.core.logging import processing_fields
+from payment_processor.domain.payment import InvalidPaymentTransition
 from payment_processor.services.payment_leases import (
     EXTERNAL_CALL_TIMEOUT,
     payment_lease,
@@ -39,6 +40,10 @@ class DeliverPaymentWebhookUseCase:
             ) as (payment, token):
                 outcome = "already_delivered"
                 if token is not None:
+                    if not payment.is_completed:
+                        raise InvalidPaymentTransition(
+                            "Webhook delivery requires a completed payment"
+                        )
                     snapshot = PaymentDetailsResult.from_payment(payment)
                     async with asyncio.timeout(EXTERNAL_CALL_TIMEOUT):
                         await sender.send(snapshot)

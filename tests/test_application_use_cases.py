@@ -439,3 +439,20 @@ async def test_external_deadline_releases_lease(
     repository.release_lease.assert_awaited_once()
     repository.save.assert_not_awaited()
     repository.mark_webhook_delivered.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", list(PaymentStatus))
+async def test_incomplete_payment_never_reaches_sender_and_releases_lease(status):
+    saved = payment()
+    saved.status = status
+    repository = AsyncMock()
+    repository.find_by_id_for_update.return_value = saved
+    sender = AsyncMock()
+    with pytest.raises(ValueError, match="completed payment"):
+        await DeliverPaymentWebhookUseCase(lambda: store_scope(repository)).deliver(
+            saved.id, sender
+        )
+    sender.send.assert_not_awaited()
+    repository.mark_webhook_delivered.assert_not_awaited()
+    repository.release_lease.assert_awaited_once()
