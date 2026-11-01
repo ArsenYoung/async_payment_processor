@@ -13,6 +13,7 @@ x-application: &application
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: payments_e2e
@@ -27,6 +28,7 @@ services:
       retries: 60
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: e2e
@@ -42,13 +44,16 @@ services:
       retries: 60
 
   migrate:
+    restart: "no"
     <<: *application
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
+    restart: unless-stopped
         condition: service_healthy
 
   api:
+    restart: unless-stopped
     <<: *application
     command: ["uvicorn", "payment_processor.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
@@ -67,9 +72,11 @@ services:
       retries: 60
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    restart: unless-stopped
     <<: *application
     command: ["python", "-m", "payment_processor.outbox_to_rabbitmq_worker.main"]
     environment:
@@ -77,11 +84,14 @@ services:
       OUTBOX_POLL_INTERVAL: "0.1"
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
+    restart: unless-stopped
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    restart: unless-stopped
     <<: *application
     command: ["python", "/app/e2e/consumer.py"]
     environment:
@@ -91,20 +101,25 @@ services:
       - ./tests/e2e:/app/e2e:ro
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
+    restart: unless-stopped
         condition: service_healthy
       webhook-receiver:
         condition: service_healthy
 
   rabbitmq-to-payment-worker-smoke:
+    restart: unless-stopped
     <<: *application
     profiles: [smoke]
     command: ["python", "-m", "payment_processor.rabbitmq_to_payment_worker.main"]
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
+    restart: unless-stopped
         condition: service_healthy
 
   webhook-receiver:

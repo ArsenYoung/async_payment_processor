@@ -1,5 +1,6 @@
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-payments}
@@ -16,6 +17,7 @@ services:
       retries: 5
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.13-management-alpine
     hostname: rabbitmq
     environment:
@@ -33,6 +35,7 @@ services:
       retries: 5
 
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -58,9 +61,11 @@ services:
       retries: 5
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
 
   outbox-to-rabbitmq-worker:
+    restart: unless-stopped
     image: payment-processing-worker:local
     build:
       context: .
@@ -76,11 +81,14 @@ services:
       OUTBOX_PUBLISH_TIMEOUT: ${OUTBOX_PUBLISH_TIMEOUT:-5.0}
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
+    restart: unless-stopped
         condition: service_healthy
 
   rabbitmq-to-payment-worker:
+    restart: unless-stopped
     image: payment-processing-worker:local
     build:
       context: .
@@ -101,11 +109,14 @@ services:
       CONSUMER_PREFETCH_COUNT: ${CONSUMER_PREFETCH_COUNT:-5}
     depends_on:
       migrate:
+    restart: "no"
         condition: service_completed_successfully
       rabbitmq:
+    restart: unless-stopped
         condition: service_healthy
 
   migrate:
+    restart: "no"
     image: payment-processing-app:local
     build:
       context: .
@@ -117,6 +128,7 @@ services:
       API_KEY: ${API_KEY:?API_KEY must be set in .env}
     depends_on:
       postgres:
+    restart: unless-stopped
         condition: service_healthy
 
 volumes:

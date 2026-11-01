@@ -841,3 +841,5 @@ CI запускает Docker smoke/e2e отдельным job с `RUN_DOCKER_SMO
 Webhook transport разрешает только публичные unicast IPv4/IPv6. Все DNS-адреса проверяются при создании подключения; сокет открывается по проверенному числовому адресу, при этом Host и TLS SNI сохраняют исходное имя. Повторное подключение заново применяет политику. Redirect и proxy из окружения отключены. URL с credentials отклоняются.
 
 Production по умолчанию запрещает loopback, private, link-local, reserved и multicast. Для локального приёмника требуется `APP_ENV=local` или `test` и явный JSON-список `WEBHOOK_ALLOWED_PRIVATE_HOSTS=["webhook-receiver"]`. Production отклоняет такую конфигурацию. Изолированные Compose-тесты разрешают только свой приёмник. Смена окружения требует перезапуска процесса.
+
+Compose задаёт `restart: unless-stopped` для API, обоих воркеров, PostgreSQL и RabbitMQ. Завершение процесса запускает восстановление; ручной `docker compose stop` сохраняет остановку. Одноразовый `migrate` имеет `restart: "no"`; его неуспех блокирует зависимые сервисы. Фатальные ошибки воркеров сохраняют ненулевой exit code.
