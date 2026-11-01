@@ -126,6 +126,25 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  outbox-cleanup:
+    profiles: [maintenance]
+    image: payment-processing-app:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "payment_processor.operations.outbox_cleanup", "--repeat"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-payments}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      API_KEY: ${API_KEY:?API_KEY must be set in .env}
+      OUTBOX_RETENTION_DAYS: ${OUTBOX_RETENTION_DAYS:-30}
+      OUTBOX_CLEANUP_BATCH_SIZE: ${OUTBOX_CLEANUP_BATCH_SIZE:-500}
+      OUTBOX_CLEANUP_INTERVAL: ${OUTBOX_CLEANUP_INTERVAL:-86400}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   migrate:
     restart: "no"
     image: payment-processing-app:local
